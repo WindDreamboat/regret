@@ -12,6 +12,11 @@
 
 ### 新增
 
+- 交互风格旋钮（端到端与测试替身）：`MockChatProvider` 探测风格段标记并给回复加确定性前缀（哑探测，不解析渲染文本）；`e2e/app.spec.ts` 新增 4 个用例——调整旋钮后回复带上风格设定且刷新后设置保留、`challenge` 滑块下限为 0.15、恢复默认后不再注入、界面不暴露参数名或 JSON 字面量。
+  - 同时修复 e2e 既有竞态：助手气泡在流式结束时就显示完整文本，而落库在其后，原先「发送后直接刷新」的用例会与写入竞争（本次跑分中暴露为 desktop 失败 / mobile flaky）。新增 `waitForStoredMessages` 辅助，凡发送后刷新的用例先等落库完成。
+  - 测试：单测 138、e2e 26（desktop/mobile 各半）、`tsc` 与 `build` 通过；`npm run eval -- --mock` 为 31 用例 / 61 轮。评测不传 `strategy`，默认路径提示词逐字节不变，故 G1/G3 基线不受本次变更影响。
+  - **回滚条件**：`git revert` 该测试提交；回滚后旋钮的端到端接线失去自动化保护（单测仍覆盖 core 渲染与夹紧），且「发送后刷新」的竞态会重新出现。
+
 - 交互风格旋钮（core）：`core/strategy/types.ts` 新增 `StrategyProfile`（`proactivity` / `empathyDensity` / `humor` / `pace` / `verbosity` / `challenge`，均 0-1，默认 0.5）、`CHALLENGE_MIN = 0.15`、`normalizeStrategy`（localStorage 是不可信边界：类型非法退回默认、越界夹紧、`challenge` 取 0.15 下限、不改入参）。`composePrompt` 新增 `strategy` 上下文，风格段置于**输出协议之后、关系状态之前**（落在稳定缓存前缀内），且**只渲染偏离默认的旋钮**；六项全默认时整节省略，因此默认路径的提示词逐字节不变。
   - 测试：新增 `core/strategy/types.test.ts` 11 例、`compose.test.ts` 策略段 7 例（位置、省略、局部渲染、无 JSON/无旋钮英文名、下限表述、前缀稳定）。
   - **回滚条件**：`git revert` 该功能提交；`strategy` 为可选上下文，回滚后 `composePrompt` 行为与引入前一致。**注意**：回滚会让 `compose.test.ts` 中策略段的 7 个用例一并失败，需同步移除。
