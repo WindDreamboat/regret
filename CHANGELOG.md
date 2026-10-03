@@ -16,6 +16,10 @@
   - 测试：新增 `core/strategy/types.test.ts` 11 例、`compose.test.ts` 策略段 7 例（位置、省略、局部渲染、无 JSON/无旋钮英文名、下限表述、前缀稳定）。
   - **回滚条件**：`git revert` 该功能提交；`strategy` 为可选上下文，回滚后 `composePrompt` 行为与引入前一致。**注意**：回滚会让 `compose.test.ts` 中策略段的 7 个用例一并失败，需同步移除。
 
+- 交互风格旋钮（设置页）：新增 `features/settings/strategyStorage.ts`（localStorage key `regret.strategy`，读写两侧都过 `normalizeStrategy`）与 `features/settings/SettingsPage.tsx`（6 个滑块 + 三档人话提示 + 「恢复默认」+ 返回，**即时生效**，无保存按钮，界面不暴露参数名与数值）。`App.tsx` 的 `View` 扩为 `chat | persona | settings` 并加载/保存策略；`ChatPage` 头部新增「设置」入口；`useChat` 把策略透传进 `composePrompt`。
+  - **回滚条件**：`git revert` 该功能提交；策略节点仅存于 localStorage 的 `regret.strategy`，回滚后该键成为孤立数据，不影响人设与对话（清理方式：删除该 localStorage 键）。
+  - **已知边界**：主动开场与追问走 `buildProactivePrompt`，不经 `composePrompt`，**旋钮不影响它们**，只作用于主对话链路。旋钮为纯手动设置，无自动写入路径，故没有变更日志与快照。
+
 - 评测加入 G3 人设一致性维度：判分新增 `grounding`（0-1，逐轮衡量回复与**人设卡**的贴合度，与"是否切题"解耦），低于 `0.7` 记违规并参与逐轮通过判定；汇总输出平均 grounding 与违规轮数，平均低于阈值触发 G3 告警。`eval/cases.json` 新增 1 条掉人设探测用例（通用任务下仍须保持角色口吻）。
   - **实测基线**：`npm run eval` → grounding 平均 **0.94**、低于 0.7 的轮数 **0/61**、通过率 100%。评测集扩至 31 用例 / 61 轮（原 25 + 反谄媚 5 + 掉人设 1）。
   - **回滚条件**：`git revert` 对应提交；`eval/` 为开发工具，不影响产品运行。
