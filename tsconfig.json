@@ -15,5 +15,5 @@
     "allowImportingTsExtensions": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "server", "e2e", "eval", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "server", "e2e", "eval", "vite.config.ts", "playwright.config.ts", "capacitor.config.ts"]
 }
