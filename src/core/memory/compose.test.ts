@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '../llm/protocol'
 import type { Persona } from '../persona/types'
-import { DEFAULT_MAX_HISTORY, composePrompt, type ComposeContext } from './compose'
+import { DEFAULT_MAX_HISTORY, STRATEGY_SECTION_MARKER, composePrompt, type ComposeContext } from './compose'
+import { DEFAULT_STRATEGY, type StrategyProfile } from '../strategy/types'
 import type { Fact, Relation, Summary } from './types'
 
 const persona: Persona = {
@@ -220,5 +221,92 @@ describe('composePrompt', () => {
     const history: ChatMessage[] = [{ role: 'user', content: '在吗' }]
     composePrompt(context({ history }))
     expect(history).toHaveLength(1)
+  })
+})
+
+describe('composePrompt 策略段', () => {
+  const custom: StrategyProfile = {
+    ...DEFAULT_STRATEGY,
+    proactivity: 0.9,
+    humor: 0.1,
+    challenge: 0.9,
+  }
+
+  it('策略段落在输出协议之后、关系状态之前', () => {
+    const result = composePrompt(context({ strategy: custom }))
+    const strategyIndex = result.findIndex((message) =>
+      message.content.includes(STRATEGY_SECTION_MARKER),
+    )
+    const relationIndex = result.findIndex((message) => message.content.includes('你们的关系'))
+
+    expect(strategyIndex).toBe(2)
+    expect(relationIndex).toBe(3)
+  })
+
+  it('全默认策略整节省略，不产生空 system 消息', () => {
+    const result = composePrompt(context({ strategy: DEFAULT_STRATEGY }))
+    expect(result.some((message) => message.content.includes(STRATEGY_SECTION_MARKER))).toBe(false)
+  })
+
+  it('未提供策略时与全默认等价', () => {
+    const without = composePrompt(context())
+    const withDefault = composePrompt(context({ strategy: DEFAULT_STRATEGY }))
+    expect(without).toEqual(withDefault)
+  })
+
+  it('只渲染偏离默认的旋钮，未动的不出现', () => {
+    const result = composePrompt(context({ strategy: custom }))
+    const card = result.find((message) => message.content.includes(STRATEGY_SECTION_MARKER))?.content ?? ''
+
+    expect(card).toContain('主动')
+    expect(card).toContain('幽默')
+    expect(card).toContain('不同看法')
+    // empathyDensity / pace / verbosity 仍为默认，不应渲染
+    expect(card).not.toContain('共情')
+    expect(card).not.toContain('关系推进')
+    expect(card).not.toContain('简短')
+    expect(card).not.toContain('详细')
+  })
+
+  it('不输出 JSON 字面量，也不暴露旋钮英文名或数值', () => {
+    const card =
+      composePrompt(context({ strategy: custom })).find((message) =>
+        message.content.includes(STRATEGY_SECTION_MARKER),
+      )?.content ?? ''
+
+    expect(card).not.toContain('{')
+    expect(card).not.toContain('0.9')
+    for (const key of Object.keys(DEFAULT_STRATEGY)) {
+      expect(card).not.toContain(key)
+    }
+  })
+
+  it('challenge 低于默认时用角色立场表述，不出现否定式或机制词', () => {
+    const card =
+      composePrompt(context({ strategy: { ...DEFAULT_STRATEGY, challenge: 0.15 } })).find((message) =>
+        message.content.includes(STRATEGY_SECTION_MARKER),
+      )?.content ?? ''
+
+    expect(card).toContain('委婉')
+    expect(card).not.toContain('不要')
+    expect(card).not.toContain('记忆')
+    expect(card).not.toContain('规则')
+  })
+
+  it('高 challenge 给出更直接表达不同看法的指引', () => {
+    const card =
+      composePrompt(context({ strategy: { ...DEFAULT_STRATEGY, challenge: 1 } })).find((message) =>
+        message.content.includes(STRATEGY_SECTION_MARKER),
+      )?.content ?? ''
+    expect(card).toContain('不同看法')
+  })
+
+  it('同一策略下 system 前缀稳定，可供上下文缓存命中', () => {
+    const first = composePrompt(context({ strategy: custom, history: [{ role: 'user', content: '在吗' }] }))
+    const second = composePrompt(context({ strategy: custom, history: [{ role: 'user', content: '好累' }] }))
+    expect(first[0]).toEqual(second[0])
+    expect(first[1]).toEqual(second[1])
+    expect(first[2]).toEqual(second[2])
+    expect(first[3]).toEqual(second[3])
   })
 })
