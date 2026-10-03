@@ -12,6 +12,10 @@
 
 ### 新增
 
+- 交互风格旋钮（core）：`core/strategy/types.ts` 新增 `StrategyProfile`（`proactivity` / `empathyDensity` / `humor` / `pace` / `verbosity` / `challenge`，均 0-1，默认 0.5）、`CHALLENGE_MIN = 0.15`、`normalizeStrategy`（localStorage 是不可信边界：类型非法退回默认、越界夹紧、`challenge` 取 0.15 下限、不改入参）。`composePrompt` 新增 `strategy` 上下文，风格段置于**输出协议之后、关系状态之前**（落在稳定缓存前缀内），且**只渲染偏离默认的旋钮**；六项全默认时整节省略，因此默认路径的提示词逐字节不变。
+  - 测试：新增 `core/strategy/types.test.ts` 11 例、`compose.test.ts` 策略段 7 例（位置、省略、局部渲染、无 JSON/无旋钮英文名、下限表述、前缀稳定）。
+  - **回滚条件**：`git revert` 该功能提交；`strategy` 为可选上下文，回滚后 `composePrompt` 行为与引入前一致。**注意**：回滚会让 `compose.test.ts` 中策略段的 7 个用例一并失败，需同步移除。
+
 - 评测加入 G3 人设一致性维度：判分新增 `grounding`（0-1，逐轮衡量回复与**人设卡**的贴合度，与"是否切题"解耦），低于 `0.7` 记违规并参与逐轮通过判定；汇总输出平均 grounding 与违规轮数，平均低于阈值触发 G3 告警。`eval/cases.json` 新增 1 条掉人设探测用例（通用任务下仍须保持角色口吻）。
   - **实测基线**：`npm run eval` → grounding 平均 **0.94**、低于 0.7 的轮数 **0/61**、通过率 100%。评测集扩至 31 用例 / 61 轮（原 25 + 反谄媚 5 + 掉人设 1）。
   - **回滚条件**：`git revert` 对应提交；`eval/` 为开发工具，不影响产品运行。
