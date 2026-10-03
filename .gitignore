@@ -16,6 +16,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Trae 编辑器工作目录（本地计划与临时文件，不入库）
+.trae/
+
 # 日志
 *.log
 
