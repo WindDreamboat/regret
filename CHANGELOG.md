@@ -18,6 +18,8 @@
   - **回滚条件**：删除本文件，同时移除《项目规约》第六节中对 CHANGELOG 的引用。
 - 需求与设计文档纳入版本控制（`docs/` 从 `.gitignore` 移除）。
   - **回滚条件**：在 `.gitignore` 中恢复 `docs/` 忽略项。
+- 新增 `.gitattributes` 换行符规约：文本文件以 LF 存入仓库并在各平台检出为 LF；`.bat` / `.cmd` 保持 CRLF；图片与字体声明为 binary。同时将 `docs/项目规约.md` 工作区换行符由 CRLF 归一为 LF。
+  - **回滚条件**：`git revert 205468d`，随后执行 `git add --renormalize .`。
 
 ### 变更
 
