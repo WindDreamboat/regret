@@ -120,6 +120,14 @@
 
 ### 变更
 
+- 迭代 4 批次 3：主链路的体积与渲染有界化（三处实测的无界增长，非猜测性优化）。
+  - `features/chat/useChat.ts`：抽取游标 `extractedCountRef` 不持久化、刷新后归零，此前一次触发会把**整段历史**打包发给模型；现单次最多送入 40 条（`EXTRACTION_WINDOW_MESSAGES`），更早原文此前已抽取、事实已在库中。
+  - `features/chat/ChatPage.tsx`：此前为每条消息生成气泡，长对话下 DOM 与每次按键的重渲成本随历史线性增长；现只渲染最近 **60** 条，并在顶部提示「更早的 N 条仍保存在本地」，数据不丢。
+  - `core/memory/compose.test.ts`：新增长历史回归护栏（历史 500 条时只保留最近一段、窗口外原文不进入提示）。
+  - 测试：单测 152、e2e 34、`tsc` 与 `build` 通过。**体积基线：`dist` JS 341.8 kB（gzip 109.8 kB）、CSS 12.5 kB（gzip 3.1 kB）。**
+  - **回滚条件**：`git revert` 该提交；两处均为常量与切片，回滚后功能不变，仅恢复无界增长。
+  - **未验证**：验收项「长对话响应延迟 < 2s」需真实部署的代理与密钥在真机实测，本轮**未验证**；上述改动只保证客户端侧提示与渲染成本有界，延迟主因仍在模型 API。
+
 - `core/memory/compose.ts` 的 `composePrompt` 签名由 `(persona, history, options)` 改为 `(context, options)`，`context` 汇聚人设、关系状态、事实与摘要。渲染顺序为「人设卡 → 输出协议（含状态块格式与不点破记忆的约束）→ 关系状态 → 事实（按 key 字典序）→ 摘要 → 历史」，每段各占一条独立 system 消息，空段整节省略以保住缓存前缀。同步更新调用点 `features/chat/useChat.ts`。
   - **回滚条件**：`git revert` 该提交；旧签名的调用点仅 `useChat.ts` 一处，回滚后 e2e 全量用例可验证行为未变。
 - 新增 `.gitignore` 条目 `.trae/`，避免本地计划与临时文件入库。
