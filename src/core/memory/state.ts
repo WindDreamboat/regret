@@ -17,13 +17,25 @@ export interface ParsedState {
 const BLOCK_PATTERN = /<state>([\s\S]*?)<\/state>/g
 
 /**
+ * 剥离状态块，得到可展示的正文。
+ *
+ * 除完整块外，**未闭合的 `<state>` 尾巴也一并去掉**：流式过程中标签尚未收尾，
+ * 若只处理完整块，用户会短暂看到 `<state>{"mood"...` 这样的原文。
+ */
+export function stripStateBlock(content: string): string {
+  const closed = content.replace(BLOCK_PATTERN, '')
+  const unclosed = closed.indexOf('<state>')
+  return (unclosed === -1 ? closed : closed.slice(0, unclosed)).trim()
+}
+
+/**
  * 从回复中剥离 `<state>` 块并解析其内容。
  *
  * 无论 JSON 是否合法，标签都会被剥离，避免把原始标签展示给用户；
  * 模型输出是不可信边界，字段类型不符即判为非法（规约第五节）。
  */
 export function parseStateBlock(content: string): ParsedState {
-  const text = content.replace(BLOCK_PATTERN, '').trim()
+  const text = stripStateBlock(content)
   const match = content.match(/<state>([\s\S]*?)<\/state>/)
   const raw = match?.[1]
   if (raw === undefined) return { text, state: null }

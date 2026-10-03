@@ -26,6 +26,8 @@ export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSet
   const [input, setInput] = useState('')
 
   const submit = () => {
+    // 正在生成时不要清空输入框：send 会直接返回，否则用户刚打的字会被无谓清掉
+    if (isGenerating) return
     const text = input
     setInput('')
     void send(text)
@@ -86,7 +88,9 @@ export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSet
           <Bubble key={`${message.ts}-${index}`} role={message.role} content={message.content} />
         ))}
 
-        {isGenerating && <Bubble role="assistant" content={draft} pending />}
+        {isGenerating && (
+          <Bubble role="assistant" content={draft} pending testId="pending-bubble" />
+        )}
 
         {error !== null && (
           <p className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-300">{error}</p>
@@ -122,13 +126,14 @@ interface BubbleProps {
   role: Speaker
   content: string
   pending?: boolean
+  testId?: string
 }
 
-function Bubble({ role, content, pending = false }: BubbleProps) {
+function Bubble({ role, content, pending = false, testId }: BubbleProps) {
   const isUser = role === 'user'
 
   return (
-    <div className={isUser ? 'flex justify-end' : 'flex justify-start'}>
+    <div className={isUser ? 'flex justify-end' : 'flex justify-start'} data-testid={testId}>
       <div
         className={[
           'max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed',

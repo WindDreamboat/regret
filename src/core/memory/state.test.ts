@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseStateBlock } from './state'
+import { parseStateBlock, stripStateBlock } from './state'
 
 describe('parseStateBlock', () => {
   it('剥离状态块，只留下正文', () => {
@@ -37,9 +37,9 @@ describe('parseStateBlock', () => {
     expect(parseStateBlock('<state>{"mood":"温和","energy":"高"}</state>').state).toBeNull()
   })
 
-  it('只有开标签没有闭标签时，不剥离也不解析', () => {
+  it('只有开标签没有闭标签时，剥掉未闭合的尾巴且不解析', () => {
     const result = parseStateBlock('正文<state>{"mood":"温和"}')
-    expect(result.text).toBe('正文<state>{"mood":"温和"}')
+    expect(result.text).toBe('正文')
     expect(result.state).toBeNull()
   })
 
@@ -50,5 +50,20 @@ describe('parseStateBlock', () => {
 
   it('affection_delta 非有限数时判为非法', () => {
     expect(parseStateBlock('<state>{"mood":"开心","energy":0.5,"affection_delta":"多"}</state>').state).toBeNull()
+  })
+})
+
+describe('stripStateBlock', () => {
+  it('流式中的半截状态块不会露给用户', () => {
+    expect(stripStateBlock('嗨，我在的<state>{"moo')).toBe('嗨，我在的')
+    expect(stripStateBlock('嗨，我在的<st')).toBe('嗨，我在的<st')
+  })
+
+  it('完整状态块照常剥离，块后正文保留', () => {
+    expect(stripStateBlock('前半<state>{"mood":"温和","energy":0.5}</state>后半')).toBe('前半后半')
+  })
+
+  it('没有状态块时原样返回', () => {
+    expect(stripStateBlock('普通一句话')).toBe('普通一句话')
   })
 })
