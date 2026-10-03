@@ -15,6 +15,8 @@ export interface MemoryStore {
   listFacts(sessionId: string): Promise<Fact[]>
   /** 应用一批事实操作，覆盖式更新；now 用于写入时间戳 */
   applyFactOps(sessionId: string, ops: FactOp[], now: number): Promise<void>
+  /** 标记某条事实已被主动追问过，避免重复追问；事实不存在时静默返回 */
+  markFactFollowedUp(sessionId: string, key: string, now: number): Promise<void>
 
   /** 返回关系状态，未初始化时返回默认值 */
   getRelation(sessionId: string): Promise<Relation>

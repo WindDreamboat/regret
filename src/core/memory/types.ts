@@ -23,6 +23,10 @@ export interface Fact {
   confidence: number
   /** 事件类事实的失效时间戳；过期后不进 prompt */
   validUntil?: number
+  /** 事件类事实的发生时间戳；用于判断事件是否已发生、可否主动追问 */
+  eventAt?: number
+  /** 已被主动追问过的时间戳；存在即不再重复追问同一事件 */
+  followedUpAt?: number
   sourceMsgIds: number[]
   firstSeenAt: number
   updatedAt: number
@@ -38,6 +42,7 @@ export type FactOp =
       category: string
       confidence: number
       validUntil?: number
+      eventAt?: number
     }
   | { op: 'delete'; key: string }
 

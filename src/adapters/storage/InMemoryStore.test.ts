@@ -123,4 +123,25 @@ describe('InMemoryStore 记忆方法', () => {
     expect((await store.listSummaries('s1')).map((item) => item.content)).toEqual(['先', '后'])
     expect(await store.listSummaries('s2')).toEqual([])
   })
+
+  it('标记事实已追问，只改 followedUpAt 并保留其余字段', async () => {
+    const store = new InMemoryStore()
+    await store.applyFactOps(
+      's1',
+      [{ op: 'upsert', key: 'user.interview', value: '面试', category: 'event', confidence: 0.9, eventAt: 3000 }],
+      100,
+    )
+
+    await store.markFactFollowedUp('s1', 'user.interview', 200)
+
+    const [fact] = await store.listFacts('s1')
+    expect(fact?.followedUpAt).toBe(200)
+    expect(fact?.value).toBe('面试')
+    expect(fact?.eventAt).toBe(3000)
+  })
+
+  it('标记不存在的事实时不抛错', async () => {
+    const store = new InMemoryStore()
+    await expect(store.markFactFollowedUp('s1', 'user.missing', 200)).resolves.toBeUndefined()
+  })
 })

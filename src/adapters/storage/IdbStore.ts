@@ -71,6 +71,12 @@ export class IdbStore implements MemoryStore {
     })
   }
 
+  async markFactFollowedUp(sessionId: string, key: string, now: number): Promise<void> {
+    const existing = await this.db.facts.get([sessionId, key])
+    if (existing === undefined) return
+    await this.db.facts.put({ ...existing, followedUpAt: now })
+  }
+
   async getRelation(sessionId: string): Promise<Relation> {
     const existing = await this.db.relations.get(sessionId)
     // 旧数据可能缺少后加的情绪字段，用默认值兜底后再覆盖已有字段

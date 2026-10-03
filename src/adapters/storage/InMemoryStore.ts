@@ -41,6 +41,13 @@ export class InMemoryStore implements MemoryStore {
     }
   }
 
+  async markFactFollowedUp(sessionId: string, key: string, now: number): Promise<void> {
+    const storageKey = `${sessionId}\u0000${key}`
+    const existing = this.facts.get(storageKey)
+    if (existing === undefined) return
+    this.facts.set(storageKey, { ...existing, followedUpAt: now })
+  }
+
   async getRelation(sessionId: string): Promise<Relation> {
     const existing = this.relations.get(sessionId)
     const base = createDefaultRelation(sessionId, Date.now())

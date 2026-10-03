@@ -91,6 +91,35 @@ describe('applyFactOps', () => {
     expect(result[0]?.validUntil).toBe(5000)
   })
 
+  it('保留 eventAt', () => {
+    const result = applyFactOps(
+      's1',
+      [],
+      [
+        {
+          op: 'upsert',
+          key: 'user.interview',
+          value: '面试',
+          category: 'event',
+          confidence: 0.9,
+          eventAt: 3000,
+        },
+      ],
+      1000,
+    )
+    expect(result[0]?.eventAt).toBe(3000)
+  })
+
+  it('覆盖式更新时保留既有的 followedUpAt', () => {
+    const result = applyFactOps(
+      's1',
+      [fact({ key: 'user.interview', category: 'event', eventAt: 3000, followedUpAt: 5000 })],
+      [{ op: 'upsert', key: 'user.interview', value: '面试', category: 'event', confidence: 0.9, eventAt: 3000 }],
+      6000,
+    )
+    expect(result[0]?.followedUpAt).toBe(5000)
+  })
+
   it('不修改传入的既有事实数组', () => {
     const existing = [fact()]
     applyFactOps(
@@ -163,6 +192,32 @@ describe('parseFactOps', () => {
     expect(parseFactOps(raw)?.[0]).toMatchObject({ validUntil: 5000 })
   })
 
+  it('保留 upsert 的 eventAt', () => {
+    const raw = JSON.stringify({
+      ops: [
+        {
+          op: 'upsert',
+          key: 'user.interview',
+          value: '面试',
+          category: 'event',
+          confidence: 0.9,
+          eventAt: 3000,
+        },
+      ],
+    })
+    expect(parseFactOps(raw)?.[0]).toMatchObject({ eventAt: 3000 })
+  })
+
+  it('eventAt 非数字返回 null', () => {
+    expect(
+      parseFactOps(
+        JSON.stringify({
+          ops: [{ op: 'upsert', key: 'a', value: 'b', category: 'c', confidence: 0.9, eventAt: '下周' }],
+        }),
+      ),
+    ).toBeNull()
+  })
+
   it('空 ops 数组视为合法，返回空数组', () => {
     expect(parseFactOps(JSON.stringify({ ops: [] }))).toEqual([])
   })
@@ -223,6 +278,11 @@ describe('buildExtractionPrompt', () => {
     expect(system).toContain('user.city')
     expect(system).toContain('upsert')
     expect(system).toContain('validUntil')
+  })
+
+  it('system 要求事件类事实附带 eventAt', () => {
+    const system = buildExtractionPrompt([], transcript)[0]?.content ?? ''
+    expect(system).toContain('eventAt')
   })
 
   it('user 消息按角色前缀渲染全部对话原文', () => {

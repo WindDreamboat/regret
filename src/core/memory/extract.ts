@@ -52,9 +52,18 @@ function parseFactOp(item: unknown): FactOp | null {
     const validUntil = item['validUntil']
     if (validUntil !== undefined && typeof validUntil !== 'number') return null
 
-    return validUntil === undefined
-      ? { op: 'upsert', key, value, category, confidence }
-      : { op: 'upsert', key, value, category, confidence, validUntil }
+    const eventAt = item['eventAt']
+    if (eventAt !== undefined && typeof eventAt !== 'number') return null
+
+    return {
+      op: 'upsert',
+      key,
+      value,
+      category,
+      confidence,
+      ...(validUntil === undefined ? {} : { validUntil }),
+      ...(eventAt === undefined ? {} : { eventAt }),
+    }
   }
 
   return null
@@ -92,6 +101,9 @@ export function applyFactOps(
       category: op.category,
       confidence: Math.max(op.confidence, prev?.confidence ?? 0),
       validUntil: op.validUntil,
+      eventAt: op.eventAt,
+      // 已追问标记不因再次抽取而丢失，避免重复追问同一事件
+      followedUpAt: prev?.followedUpAt,
       sourceMsgIds: prev ? [...prev.sourceMsgIds] : [],
       firstSeenAt: prev?.firstSeenAt ?? now,
       updatedAt: now,
@@ -124,7 +136,7 @@ const EXTRACTION_INSTRUCTION = [
   '输出格式：{"ops":[{"op":"upsert","key":"...","value":"...","category":"...","confidence":0.0-1.0}]}',
   '规则：',
   '- 用户改口时以新说法为准，同一 key 直接 upsert 覆盖；',
-  '- 事件类事实必须附带 validUntil（毫秒时间戳），过期后视为无效；',
+  '- 事件类事实必须附带 eventAt（事件发生时间）与 validUntil（失效时间），均为毫秒时间戳；',
   '- 不确定的表述把 confidence 设在 0.6 以下；',
   '- 需要删除已失效的事实，用 {"op":"delete","key":"..."}。',
 ].join('\n')
