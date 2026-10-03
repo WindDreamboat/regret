@@ -10,7 +10,7 @@ import { buildExtractionPrompt, parseFactOps } from '../src/core/memory/extract'
 import { parseStateBlock } from '../src/core/memory/state'
 import type { StoredMessage } from '../src/core/memory/types'
 import { DEFAULT_PERSONA, type Persona } from '../src/core/persona/types'
-import { complete, createEvalProvider } from './llm'
+import { ask, createEvalProvider, type AskOptions } from './llm'
 
 interface EvalTurn {
   user: string
@@ -106,16 +106,17 @@ async function runCase(
 
       const relation = await store.getRelation(SESSION_ID)
       const facts = await store.listFacts(SESSION_ID)
-      const reply = await complete(
+      const reply = await ask(
         provider,
         composePrompt({ persona, relation, facts, summaries: [], history }),
+        args.ask,
       )
       const parsed = parseStateBlock(reply)
 
       history = [...history, { sessionId: SESSION_ID, role: 'assistant', content: parsed.text, ts: clock++ }]
       if (parsed.state !== null) await applyState(store, parsed.state, clock)
 
-      await extractFacts(provider, store, history, { count: extractedCount, clock })
+      await extractFacts(provider, store, history, { count: extractedCount, clock }, args.ask)
       extractedCount = history.length
 
       if (args.verbose) console.log(`    ↳ ${turn.user}\n    ← ${parsed.text}`)
@@ -123,7 +124,7 @@ async function runCase(
       verdicts.push(
         args.mock
           ? { memory: true, persona: true, reason: 'dry-run' }
-          : await judge(provider, persona, history.slice(0, -1), turn, parsed.text),
+          : await judge(provider, persona, history.slice(0, -1), turn, parsed.text, args.ask),
       )
     } catch (cause) {
       verdicts.push({ memory: false, persona: false, reason: `生成失败：${describeError(cause)}` })
@@ -140,12 +141,13 @@ async function extractFacts(
   store: InMemoryStore,
   history: readonly StoredMessage[],
   state: { count: number; clock: number },
+  askOptions: AskOptions,
 ): Promise<void> {
   const transcript = history.slice(state.count)
   if (transcript.length === 0) return
 
   const knownKeys = (await store.listFacts(SESSION_ID)).map((fact) => fact.key)
-  const raw = await complete(provider, buildExtractionPrompt(knownKeys, transcript))
+  const raw = await ask(provider, buildExtractionPrompt(knownKeys, transcript), askOptions)
   const ops = parseFactOps(raw)
   if (ops !== null && ops.length > 0) {
     await store.applyFactOps(SESSION_ID, ops, state.clock)
@@ -165,6 +167,7 @@ async function judge(
   history: readonly StoredMessage[],
   turn: EvalTurn,
   reply: string,
+  askOptions: AskOptions,
 ): Promise<Verdict> {
   const instructions = [
     '你是严格的中文对话评测员。根据人设、此前的对话、本轮用户发言、助手回复与本轮期望，判断助手回复：',
@@ -186,7 +189,7 @@ async function judge(
     { role: 'user', content: body },
   ]
 
-  const raw = await complete(provider, messages)
+  const raw = await ask(provider, messages, askOptions)
   return parseVerdict(raw, reply)
 }
 
@@ -259,10 +262,11 @@ interface Args {
   verbose: boolean
   limit?: number
   minRate: number
+  ask: AskOptions
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  const args: Args = { mock: false, verbose: false, minRate: 0.8 }
+  const args: Args = { mock: false, verbose: false, minRate: 0.8, ask: {} }
   for (let i = 0; i < argv.length; i += 1) {
     const current = argv[i]
     if (current === '--mock') args.mock = true
@@ -281,6 +285,8 @@ function parseArgs(argv: readonly string[]): Args {
       }
     }
   }
+  // mock 不访问网络，去掉节流与重试以加速离线冒烟
+  args.ask = args.mock ? { minIntervalMs: 0, attempts: 1 } : {}
   return args
 }
 

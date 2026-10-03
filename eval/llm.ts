@@ -26,3 +26,47 @@ export async function complete(provider: ChatProvider, messages: ChatMessage[]):
   }
   return text
 }
+
+export interface AskOptions {
+  /** 两次调用之间的最小间隔，缓解网关速率限制 */
+  minIntervalMs?: number
+  /** 失败重试次数（指数退避） */
+  attempts?: number
+}
+
+let lastCallAt = 0
+
+/**
+ * 带节流与重试的完成调用。
+ *
+ * 网关常有速率限制，429 属于瞬时失败而非内容不合格；这里统一按指数退避重试，
+ * 避免把限流误判成评测不通过。
+ */
+export async function ask(
+  provider: ChatProvider,
+  messages: ChatMessage[],
+  options: AskOptions = {},
+): Promise<string> {
+  const minIntervalMs = options.minIntervalMs ?? 300
+  const attempts = options.attempts ?? 4
+  let lastError: unknown
+
+  for (let i = 0; i < attempts; i += 1) {
+    const wait = lastCallAt + minIntervalMs - Date.now()
+    if (wait > 0) await sleep(wait)
+    lastCallAt = Date.now()
+
+    try {
+      return await complete(provider, messages)
+    } catch (error) {
+      lastError = error
+      await sleep(500 * 2 ** i)
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
