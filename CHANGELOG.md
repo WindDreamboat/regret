@@ -12,6 +12,17 @@
 
 ### 新增
 
+- 迭代 4 批次 2：记忆导出与两项清除（设置页）。
+  - **修复** `clearSession` 只删 `messages`：名字与 `MemoryStore` 注释都表明它应清空整个会话，实际残留事实、关系与摘要（`src` 下无生产调用方，仅测试引用，因此现在修零风险）。现改为单事务删除 `messages / facts / relations / summaries`，两个实现同步，两个 store 测试各加「清 s1 会清掉四类数据且不碰 s2」。
+  - 新增 `core/memory/export.ts`：纯函数 `buildMemoryExport`，输出含 `format` / `version` / `exportedAt` / 五类内容（对话、事实、关系、摘要）以及**人设与旋钮**，深拷贝；配 `export.test.ts` 5 例。
+  - `core/memory/types.ts` 新增 `DEFAULT_SESSION_ID`，`useChat` 改引用（行为不变）。
+  - `features/persona/personaStorage.ts` 与 `features/settings/strategyStorage.ts` 各加 `clearPersona` / `clearStrategy`（key 保持私有）。
+  - 新增 `features/settings/dataManagement.ts`：`downloadMemoryExport`（Blob + anchor，文件名带日期）、`clearConversation`（清会话，保留人设与旋钮）、`resetToFactory`（清会话 + 两个 localStorage 键）。清除后统一 `location.reload()`——`useChat` 持有消息、抽取游标、待跟进话题三个 ref，局部复位易漏。
+  - `SettingsPage` 新增「数据」区块：导出记忆备份、清除对话与记忆、恢复出厂设置；两项破坏性操作**就地二次确认**（不用 `window.confirm`）。
+  - 测试：单测 151；e2e 34，新增导出触发下载、清除后回到开场（只剩欢迎语、关系归初识/0）且人设旋钮保留、恢复出厂后人设与旋钮回默认、取消不清除。
+  - **回滚条件**：`git revert` 该功能提交。回滚后 `clearSession` 会重新只删消息（若已有用户用过「清除对话与记忆」，其残留的事实/关系/摘要会与新对话共存，需手动清理或改回本次实现）；导出与清除 UI 一并消失，导出文件格式无版本兼容负担。
+  - **注意**：本期**只导出不导入**。
+
 - 迭代 4 批次 1：代理可打包化（跨源预检 + 可配置绝对地址）。
   - `server/handler.ts`：新增 `OPTIONS` 预检处理（`204` + `Access-Control-Allow-Origin/Methods/Headers` + `Access-Control-Max-Age`），所有响应（含 SSE 透传）补 `Access-Control-Allow-Origin` 与 `Vary: Origin`；允许来源由 `CHAT_ALLOWED_ORIGIN` 逗号分隔白名单给出，默认 `https://localhost`（Capacitor WebView 来源）。**此修复是打包版能否发出请求的前提**：此前非 POST 一律 405，WebView 的跨源预检会被直接拒绝，即使 endpoint 写对也一条消息发不出去。
   - `src/composition/root.ts`：`createServices` 新增 `VITE_CHAT_API_ENDPOINT`，非空时作为 `DeepSeekAdapter` 的绝对端点；留空仍用相对路径 `/api/chat`，Web 与开发行为逐字节不变。
