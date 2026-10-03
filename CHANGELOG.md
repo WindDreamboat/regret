@@ -29,9 +29,24 @@
   - **回滚条件**：迭代 1 为项目起点，无「上一版本」可回退。如需整体撤销，`git revert` 对应提交即可回到仅含文档与规约的状态。
 - 新增浏览器端到端测试：`e2e/app.spec.ts`（5 个用例）+ `playwright.config.ts`。用例覆盖首屏渲染、逐字流式、气泡分列与配色、刷新后 IndexedDB 恢复、人设保存与刷新后保留，在 desktop 与 390×844 移动视口各跑一遍。Playwright 自动拉起 Vite dev server（端口 5174）并强制 `VITE_CHAT_PROVIDER=mock`，不依赖真实密钥。同步新增 `test:e2e` 脚本、`@playwright/test` 开发依赖、`.gitignore` 中的测试产物条目。
   - **回滚条件**：删除 `e2e/` 与 `playwright.config.ts`，移除 `@playwright/test` 依赖与 `test:e2e` 脚本，并从 `.gitignore` 移除测试产物条目；随后可从 `tsconfig.json` 的 `include` 中移除 `e2e`、`playwright.config.ts`。**注意**：回滚后「逐字流式」这一行为将重新失去自动化保护。
+- 迭代 2：记忆系统（事实 KV、关系状态、异步抽取、分层摘要决策）。
+  - `core/memory/types.ts`：新增 `Fact` / `FactOp` / `FactStatus` / `Relation` / `Summary` 与 `createDefaultRelation`。
+  - `core/memory/extract.ts`：`parseFactOps`（手写守卫，不引 zod）、`applyFactOps`（同 key 覆盖式更新，对应「改口」；`confidence < 0.6` 先记 `pending`，二次出现升 `confirmed`）、`filterActiveFacts`（过滤 `pending` 与过期，按 key 字典序）、`buildExtractionPrompt`。
+  - `core/memory/state.ts`：`parseStateBlock` 剥离 `<state>{...}</state>` 并校验字段，模型输出按不可信边界处理。
+  - `core/memory/summarize.ts`：`selectSummaryRange` 决定是否把最老 20 条未摘要消息压为 level-1 摘要（未摘要 > 40 条为触发条件）。
+  - `core/memory/MemoryStore.ts`：接口扩展 `listFacts` / `applyFactOps` / `getRelation` / `updateRelation` / `listSummaries` / `appendSummary`，已由 `IdbStore` 与 `InMemoryStore` 两个实现落地。
+  - `adapters/storage/IdbStore.ts`：Dexie 升到 version 2，仅新增 `facts`（复合主键 `[sessionId+key]`）/ `relations` / `summaries` 三张表，`messages` 不变，无数据迁移。
+  - `features/chat/useChat.ts`：注入关系状态 / 事实 / 摘要；回复后按状态块累加亲密度（夹在 0-100）；距上次抽取满 6 轮往返时异步触发抽取，独立 `try/catch`，失败只记 console，主链路仍只有一次模型调用。
+  - 测试：Vitest 增至 90 个用例（新增 `extract` 25、`compose` 15、`state` 9、`summarize` 7 等）。
+  - **回滚条件**：`git revert` 该功能提交；Dexie 降回 version 1 需先删除本地 `regret` 库（v2 新增的表在 v1 代码中不会被读取，但降级版本号会让 Dexie 拒绝打开旧库）。抽取失败不影响对话，故无数据安全风险。
+  - **注意**：本迭代不做向量检索与记忆可视化管理界面（需求 5.7）。
 
 ### 变更
 
+- `core/memory/compose.ts` 的 `composePrompt` 签名由 `(persona, history, options)` 改为 `(context, options)`，`context` 汇聚人设、关系状态、事实与摘要。渲染顺序为「人设卡 → 输出协议（含状态块格式与不点破记忆的约束）→ 关系状态 → 事实（按 key 字典序）→ 摘要 → 历史」，每段各占一条独立 system 消息，空段整节省略以保住缓存前缀。同步更新调用点 `features/chat/useChat.ts`。
+  - **回滚条件**：`git revert` 该提交；旧签名的调用点仅 `useChat.ts` 一处，回滚后 e2e 全量用例可验证行为未变。
+- 新增 `.gitignore` 条目 `.trae/`，避免本地计划与临时文件入库。
+  - **回滚条件**：从 `.gitignore` 移除 `.trae/` 条目。
 - 默认分支由 `master` 更名为 `main`。
   - **回滚条件**：`git branch -m main master`。
 - `src/composition/root.ts` 中 `MockChatProvider` 传入 `delayMs: 30`。此前默认值为 `0`，助手回复会一次性渲染完整句子，导致无密钥的默认演示路径上看不到流式效果（已由浏览器测试证实）。
