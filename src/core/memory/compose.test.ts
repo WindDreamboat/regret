@@ -222,6 +222,21 @@ describe('composePrompt', () => {
     composePrompt(context({ history }))
     expect(history).toHaveLength(1)
   })
+
+  it('历史极长时提示体积仍有界，只保留最近一段', () => {
+    const history: ChatMessage[] = Array.from({ length: 500 }, (_, i) => ({
+      role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      content: `第 ${i} 条消息`,
+    }))
+
+    const result = composePrompt(context({ history }))
+    const historyPart = result.filter((message) => message.role !== 'system')
+
+    expect(historyPart).toHaveLength(DEFAULT_MAX_HISTORY)
+    expect(historyPart.at(-1)?.content).toBe('第 499 条消息')
+    // 窗口之外的原文一律不得进入提示
+    expect(historyPart.some((message) => message.content === '第 0 条消息')).toBe(false)
+  })
 })
 
 describe('composePrompt 策略段', () => {

@@ -14,6 +14,14 @@ const SESSION_ID = DEFAULT_SESSION_ID
 /** 距上次抽取累计满 6 轮往返（12 条消息）才触发一次异步抽取 */
 const EXTRACTION_INTERVAL_MESSAGES = 12
 
+/**
+ * 单次抽取最多送入的原文条数。
+ *
+ * 抽取游标（`extractedCountRef`）不持久化，刷新后会归零；若不设上限，
+ * 一次触发就会把整段历史打包发给模型。与主链路的历史上限同量级即可。
+ */
+const EXTRACTION_WINDOW_MESSAGES = 40
+
 /** 距上次消息超过该时长（4 小时）才视为「重新打开」，可主动追问 */
 const RETURN_GAP_MS = 4 * 60 * 60 * 1000
 
@@ -64,7 +72,9 @@ export function useChat(
       try {
         const facts = await services.memoryStore.listFacts(SESSION_ID)
         const knownKeys = facts.map((fact) => fact.key)
-        const transcript = all.slice(extractedCountRef.current)
+        // 游标之后、且不超过窗口上限；越老的原文此前已抽过，事实已落库
+        const from = Math.max(extractedCountRef.current, all.length - EXTRACTION_WINDOW_MESSAGES)
+        const transcript = all.slice(from)
         if (transcript.length === 0) return
 
         let raw = ''
