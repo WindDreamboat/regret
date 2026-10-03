@@ -47,7 +47,20 @@ export class IdbStore implements MemoryStore {
   }
 
   async clearSession(sessionId: string): Promise<void> {
-    await this.db.messages.where('sessionId').equals(sessionId).delete()
+    // 四张表都属该会话，必须一并清除，否则会残留事实、关系与摘要
+    await this.db.transaction(
+      'rw',
+      this.db.messages,
+      this.db.facts,
+      this.db.relations,
+      this.db.summaries,
+      async () => {
+        await this.db.messages.where('sessionId').equals(sessionId).delete()
+        await this.db.facts.where('sessionId').equals(sessionId).delete()
+        await this.db.relations.delete(sessionId)
+        await this.db.summaries.where('sessionId').equals(sessionId).delete()
+      },
+    )
   }
 
   async listFacts(sessionId: string): Promise<Fact[]> {

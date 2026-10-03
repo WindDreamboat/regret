@@ -22,7 +22,13 @@ export class InMemoryStore implements MemoryStore {
   }
 
   async clearSession(sessionId: string): Promise<void> {
+    // 四张表都属该会话，必须一并清除，否则会残留事实、关系与摘要
     this.messages = this.messages.filter((message) => message.sessionId !== sessionId)
+    for (const [storageKey, fact] of this.facts) {
+      if (fact.sessionId === sessionId) this.facts.delete(storageKey)
+    }
+    this.relations.delete(sessionId)
+    this.summaries = this.summaries.filter((summary) => summary.sessionId !== sessionId)
   }
 
   async listFacts(sessionId: string): Promise<Fact[]> {

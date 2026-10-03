@@ -9,6 +9,7 @@ export interface MemoryStore {
   appendMessage(message: StoredMessage): Promise<void>
   /** 按时间升序返回会话内的全部消息 */
   listMessages(sessionId: string): Promise<StoredMessage[]>
+  /** 清空该会话的全部数据：消息、事实、关系状态与摘要一并删除 */
   clearSession(sessionId: string): Promise<void>
 
   /** 返回会话内的全部事实（含 pending 与过期） */

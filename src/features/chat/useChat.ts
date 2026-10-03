@@ -5,10 +5,11 @@ import { buildExtractionPrompt, parseFactOps } from '../../core/memory/extract'
 import { buildProactivePrompt, selectFollowUp, type ProactiveKind } from '../../core/memory/followUp'
 import { parseStateBlock, type StateBlock } from '../../core/memory/state'
 import type { Fact, Relation, StoredMessage } from '../../core/memory/types'
+import { DEFAULT_SESSION_ID } from '../../core/memory/types'
 import type { Persona } from '../../core/persona/types'
 import type { StrategyProfile } from '../../core/strategy/types'
 
-const SESSION_ID = 'default'
+const SESSION_ID = DEFAULT_SESSION_ID
 
 /** 距上次抽取累计满 6 轮往返（12 条消息）才触发一次异步抽取 */
 const EXTRACTION_INTERVAL_MESSAGES = 12

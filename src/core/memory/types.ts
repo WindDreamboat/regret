@@ -1,5 +1,8 @@
 import type { Speaker } from '../llm/protocol'
 
+/** V1 为单会话：固定会话标识。导出与清除需要与 useChat 共享同一常量。 */
+export const DEFAULT_SESSION_ID = 'default'
+
 /** 持久化的对话消息 */
 export interface StoredMessage {
   /** IndexedDB 自增主键，写入时不需要提供 */

@@ -26,6 +26,11 @@ export function savePersona(persona: Persona): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(persona))
 }
 
+/** 清除已保存的人设；清除后 `loadPersona` 会回到默认人设。 */
+export function clearPersona(): void {
+  localStorage.removeItem(STORAGE_KEY)
+}
+
 function readField(source: object, key: string): string {
   const value = (source as Record<string, unknown>)[key]
   return typeof value === 'string' ? value : ''

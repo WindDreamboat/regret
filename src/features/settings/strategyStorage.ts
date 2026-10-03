@@ -22,3 +22,8 @@ export function loadStrategy(): StrategyProfile {
 export function saveStrategy(strategy: StrategyProfile): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStrategy(strategy)))
 }
+
+/** 清除已保存的旋钮设置；清除后 `loadStrategy` 会回到默认档案。 */
+export function clearStrategy(): void {
+  localStorage.removeItem(STORAGE_KEY)
+}

@@ -358,3 +358,76 @@ test('界面不暴露参数名或 JSON 字面量', async ({ page }) => {
     expect(text).not.toContain(key)
   }
 })
+
+test('导出记忆备份会触发下载', async ({ page }) => {
+  await gotoApp(page)
+  await sendMessage(page, '你好')
+  await openSettings(page)
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出记忆备份' }).click()
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toMatch(/^regret-backup-\d{4}-\d{2}-\d{2}\.json$/)
+})
+
+test('清除对话与记忆后回到开场，人设与说话方式保留', async ({ page }) => {
+  await gotoApp(page)
+
+  // 先留下数据：改人设、调旋钮、发一条消息
+  await page.getByRole('button', { name: '人设' }).click()
+  await page.getByPlaceholder('例如：小满').fill('阿念')
+  await page.getByRole('button', { name: '保存' }).click()
+  await openSettings(page)
+  await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
+  await backToChat(page)
+  await sendRaw(page, '你好')
+  await expect(page.getByTestId('relation-bar')).toContainText('亲密度 1')
+
+  await openSettings(page)
+  await page.getByRole('button', { name: '清除对话与记忆' }).click()
+  await page.getByRole('button', { name: '确认清除' }).click()
+
+  // 重载后开场逻辑会重新写回一条欢迎语；关系状态与记忆回到初始
+  await expect(page.locator(BUBBLES)).toHaveCount(1)
+  await expect(page.locator(BUBBLES).first()).toHaveText(WELCOME)
+  await expect(page.getByTestId('relation-bar')).toContainText('初识')
+  await expect(page.getByTestId('relation-bar')).toContainText('亲密度 0')
+
+  // 人设与旋钮不受影响
+  await expect(page.locator('header h1')).toHaveText('阿念')
+  await openSettings(page)
+  await expect(page.getByRole('slider', { name: '幽默感' })).toHaveValue('0.8')
+})
+
+test('恢复出厂设置会清掉人设与说话方式', async ({ page }) => {
+  await gotoApp(page)
+
+  await page.getByRole('button', { name: '人设' }).click()
+  await page.getByPlaceholder('例如：小满').fill('阿念')
+  await page.getByRole('button', { name: '保存' }).click()
+  await expect(page.locator('header h1')).toHaveText('阿念')
+
+  await openSettings(page)
+  await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
+  await page.getByRole('button', { name: '恢复出厂设置' }).click()
+  await page.getByRole('button', { name: '确认恢复' }).click()
+
+  // 回到默认人设与默认旋钮
+  await expect(page.locator('header h1')).toHaveText('小满')
+  await openSettings(page)
+  await expect(page.getByRole('slider', { name: '幽默感' })).toHaveValue('0.5')
+})
+
+test('危险操作可就地取消，不会清除数据', async ({ page }) => {
+  await gotoApp(page)
+  await sendMessage(page, '你好')
+
+  await openSettings(page)
+  await page.getByRole('button', { name: '清除对话与记忆' }).click()
+  await page.getByRole('button', { name: '取消' }).click()
+  await backToChat(page)
+
+  await expect(page.locator(BUBBLES)).toHaveCount(3)
+  await expect(page.locator(BUBBLES).last()).toHaveText(replyTo('你好'))
+})

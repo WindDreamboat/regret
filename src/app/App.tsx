@@ -49,6 +49,7 @@ export function App() {
       )}
       {view === 'settings' && (
         <SettingsPage
+          services={services}
           strategy={strategy}
           onChange={handleChangeStrategy}
           onReset={() => handleChangeStrategy(DEFAULT_STRATEGY)}

@@ -144,4 +144,37 @@ describe('InMemoryStore 记忆方法', () => {
     const store = new InMemoryStore()
     await expect(store.markFactFollowedUp('s1', 'user.missing', 200)).resolves.toBeUndefined()
   })
+
+  it('清空会话会一并清掉四类数据，且不碰其他会话', async () => {
+    const store = new InMemoryStore()
+    for (const sessionId of ['s1', 's2']) {
+      await store.appendMessage(message(`属于 ${sessionId}`, 100, sessionId))
+      await store.applyFactOps(
+        sessionId,
+        [{ op: 'upsert', key: 'user.drink', value: '拿铁', category: 'preference', confidence: 0.9 }],
+        100,
+      )
+      await store.updateRelation(sessionId, { intimacy: 30, stage: '熟悉' })
+      await store.appendSummary(sessionId, {
+        sessionId,
+        level: 1,
+        coversFromId: 1,
+        coversToId: 20,
+        content: `${sessionId} 的摘要`,
+        ts: 100,
+      })
+    }
+
+    await store.clearSession('s1')
+
+    expect(await store.listMessages('s1')).toEqual([])
+    expect(await store.listFacts('s1')).toEqual([])
+    expect(await store.listSummaries('s1')).toEqual([])
+    expect((await store.getRelation('s1')).intimacy).toBe(0)
+
+    expect(await store.listMessages('s2')).toHaveLength(1)
+    expect(await store.listFacts('s2')).toHaveLength(1)
+    expect(await store.listSummaries('s2')).toHaveLength(1)
+    expect((await store.getRelation('s2')).intimacy).toBe(30)
+  })
 })
