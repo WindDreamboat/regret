@@ -48,6 +48,13 @@
   - `adapters/storage/IdbStore.ts` 与 `InMemoryStore.ts`：`getRelation` 读取时以默认值兜底，兼容缺少新字段的旧数据，无需 Dexie 版本迁移。
   - 测试：`compose.test.ts` 新增情绪渲染 2 例（单测 92）；e2e 新增关系状态条用例（14）。
   - **回滚条件**：`git revert` 该功能提交；`mood`/`energy` 读取时均以默认值兜底，回滚后旧数据仍可正常读出，无数据风险。
+- 迭代 3 批次 2：事件时间与后续追问选择（纯逻辑）。
+  - `core/memory/types.ts`：`Fact` 新增 `eventAt`（事件发生时间）与 `followedUpAt`（已追问时间）；upsert op 支持 `eventAt`。
+  - `core/memory/extract.ts`：解析并校验 `eventAt`；覆盖式更新时保留既有 `followedUpAt`；抽取指令要求事件类事实附 `eventAt`。
+  - 新增 `core/memory/followUp.ts`：`selectFollowUp` 选出已发生、未追问、落在 7 天窗口内的 confirmed 事件，多个候选取事件时间最近的一条。
+  - `core/memory/MemoryStore.ts` 与两个实现：新增 `markFactFollowedUp`（只改该字段，事实不存在时静默返回）。
+  - 测试：单测增至 111（新增 `followUp` 10 例，extract 与两个 store 各补若干）。
+  - **回滚条件**：`git revert` 该功能提交；新字段均为可选、不参与索引，无需 Dexie 迁移，回滚后旧数据不受影响，且无 UI 行为变化。
 
 ### 变更
 
