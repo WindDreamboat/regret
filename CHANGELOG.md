@@ -12,6 +12,18 @@
 
 ### 新增
 
+- 迭代 4 批次 4：Capacitor Android 打包配置与打包指南。
+  - 依赖：`@capacitor/core`、`@capacitor/cli`、`@capacitor/android`（同一主版本 8.5.2）。
+  - 新增 `capacitor.config.ts`：`appId`、`appName`、`webDir: 'dist'`、**显式 `server.androidScheme: 'https'`**（若为 `http`，WebView 会变成不透明来源，IndexedDB 与 localStorage 将无法持久化）、`android.allowMixedContent: false`、`webContentsDebuggingEnabled: false`；不写 `server.url`（那是热更新调试用，写死会随包发布）。
+  - `package.json` 新增 `cap:add` / `cap:sync` / `cap:open` 脚本；`tsconfig.json` 纳入 `capacitor.config.ts`。
+  - `.gitignore` 排除 `android/`、`ios/`、`*.keystore`、`*.jks`、`local.properties`、`.gradle/`。**原生工程不入库**：`local.properties` 会写入本机 SDK 绝对路径，`assets/public/` 会重复拷入 `dist/` 产物；由 `npx cap add android` 在装有 SDK 的机器上生成。
+  - 新增打包指南 `docs/Android打包指南.md`：SDK 与 JAVA_HOME 配置、构建与安装命令、**构建期必须设 `VITE_CHAT_PROVIDER=deepseek` 与 `VITE_CHAT_API_ENDPOINT`**（否则会产出一个只会回显的「回声机」APK）、真机验收清单、已知局限。
+  - **本机验证**：`npx cap add android` 与 `npx cap sync android` 均成功（不调用 Gradle），生成工程中 `applicationId`、`app_name`、`androidScheme` 均与配置一致；确认 `android/` 被 git 正确忽略。
+  - **未验证**：**本机无 Android SDK，APK 从未构建或安装**。验收项「可安装运行」「体积 < 30MB」「延迟 < 2s」「无崩溃/内存泄漏」**全部未验证**，需在装有 SDK 的机器上按指南执行。
+  - **回滚条件**：`git revert` 该提交会移除配置与依赖；`android/` 从未入库，回滚不需要清理。删除三个 `@capacitor/*` 依赖与脚本即可完全恢复。
+- 新增 `docs/Android打包指南.md`：Android 打包的完整步骤、必需的环境变量、真机验收清单与已知局限（含返回键、安全区、签名与代理限流）。
+  - **回滚条件**：删除该文件即可，无代码依赖。
+
 - 迭代 4 批次 2：记忆导出与两项清除（设置页）。
   - **修复** `clearSession` 只删 `messages`：名字与 `MemoryStore` 注释都表明它应清空整个会话，实际残留事实、关系与摘要（`src` 下无生产调用方，仅测试引用，因此现在修零风险）。现改为单事务删除 `messages / facts / relations / summaries`，两个实现同步，两个 store 测试各加「清 s1 会清掉四类数据且不碰 s2」。
   - 新增 `core/memory/export.ts`：纯函数 `buildMemoryExport`，输出含 `format` / `version` / `exportedAt` / 五类内容（对话、事实、关系、摘要）以及**人设与旋钮**，深拷贝；配 `export.test.ts` 5 例。
@@ -117,6 +129,11 @@
   - 新增 `eval/llm.ts` 与 `eval/run.ts`：复用 `/api/chat` 代理与真实 prompt、抽取链路回放脚本，逐轮由 LLM 按「记忆 / 人设」判分并汇总通过率；支持 `--mock` 离线冒烟、`--limit`、`--verbose`、`--min-rate`；调用带节流与指数退避重试，避免限流被误判为不通过。
   - `package.json` 新增 `eval` 脚本与 `tsx` 开发依赖；`tsconfig.json` 的 `include` 纳入 `eval`。
   - **回滚条件**：删除 `eval/`，移除 `eval` 脚本与 `tsx` 依赖，并从 `tsconfig.json` 的 include 移除 `eval`。评测为开发工具，不影响产品运行。
+
+### 修复
+
+- `core/memory/state.ts`：新增 `stripStateBlock`，**未闭合的 `<state>` 尾巴也一并剥离**。原先只处理完整状态块，流式过程中标签尚未收尾，用户会短暂看到 `<state>{"mood"...` 这样的原文（由 e2e 暴露）。`parseStateBlock` 改用它取展示文本；`state.test.ts` 中「只有开标签没有闭标签时不剥离」的用例断言的是旧行为，已改为正确期望。**回滚条件**：`git revert` 该提交；回滚后流式过程中会重新露出半截状态块。
+- `features/chat/ChatPage.tsx` 的 `submit`：生成中按回车会先清空输入框、再被 `send` 丢弃，等于用户白打字；现改为生成中直接返回，保留已输入内容。**回滚条件**：`git revert` 该提交；回滚后输入内容会在生成中被无谓清空。
 
 ### 变更
 
