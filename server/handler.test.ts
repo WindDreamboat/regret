@@ -17,6 +17,15 @@ function postRequest(body: unknown): Request {
   })
 }
 
+/** 带 Origin 的请求，用于验证跨源（打包后的 WebView）能否通过预检 */
+function corsRequest(method: string, origin: string, body?: unknown): Request {
+  return new Request('https://app.test/api/chat', {
+    method,
+    headers: { 'Content-Type': 'application/json', Origin: origin },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+}
+
 function sseUpstream(): Response {
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
@@ -152,5 +161,69 @@ describe('createChatHandler', () => {
     const response = await handler(postRequest(validBody))
 
     expect(await response.text()).not.toContain('sk-test-secret')
+  })
+})
+
+describe('createChatHandler 跨源（打包后的 WebView）', () => {
+  it('OPTIONS 预检返回 204 并带上允许来源与请求头白名单', async () => {
+    const handler = createChatHandler({ env, fetchImpl: vi.fn<HttpFetch>() })
+
+    const response = await handler(corsRequest('OPTIONS', 'https://localhost'))
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://localhost')
+    expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST')
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('Content-Type')
+    expect(response.headers.get('Vary')).toBe('Origin')
+  })
+
+  it('预检不发起上游请求', async () => {
+    const fetchImpl = vi.fn<HttpFetch>()
+    const handler = createChatHandler({ env, fetchImpl })
+
+    await handler(corsRequest('OPTIONS', 'https://localhost'))
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('POST 响应同样带允许来源，流式响应也不例外', async () => {
+    const handler = createChatHandler({ env, fetchImpl: async () => sseUpstream() })
+
+    const response = await handler(corsRequest('POST', 'https://localhost', validBody))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://localhost')
+    expect(await response.text()).toContain('"content":"嗨"')
+  })
+
+  it('来源不在白名单时不返回允许来源，浏览器据此拦截', async () => {
+    const handler = createChatHandler({ env, fetchImpl: async () => sseUpstream() })
+
+    const preflight = await handler(corsRequest('OPTIONS', 'https://evil.example'))
+    const post = await handler(corsRequest('POST', 'https://evil.example', validBody))
+
+    expect(preflight.headers.get('Access-Control-Allow-Origin')).toBeNull()
+    expect(post.headers.get('Access-Control-Allow-Origin')).toBeNull()
+  })
+
+  it('无 Origin 头（同源或非浏览器）时不注入 CORS 头', async () => {
+    const handler = createChatHandler({ env, fetchImpl: async () => sseUpstream() })
+
+    const response = await handler(postRequest(validBody))
+
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull()
+  })
+
+  it('白名单可由环境变量配置且支持多个来源', async () => {
+    const handler = createChatHandler({
+      env: { ...env, CHAT_ALLOWED_ORIGIN: 'https://a.example, https://b.example' },
+      fetchImpl: vi.fn<HttpFetch>(),
+    })
+
+    const allowed = await handler(corsRequest('OPTIONS', 'https://b.example'))
+    const denied = await handler(corsRequest('OPTIONS', 'https://localhost'))
+
+    expect(allowed.headers.get('Access-Control-Allow-Origin')).toBe('https://b.example')
+    expect(denied.headers.get('Access-Control-Allow-Origin')).toBeNull()
   })
 })
