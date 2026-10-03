@@ -22,6 +22,8 @@ const relation: Relation = {
   sessionId: 'default',
   stage: '熟悉',
   intimacy: 42,
+  mood: '被逗笑',
+  energy: 0.7,
   addressForm: '阿泽',
   sharedExperiences: ['看了一场电影'],
   boundaries: ['不提对方的家人'],
@@ -105,6 +107,17 @@ describe('composePrompt', () => {
     expect(card).toContain('阿泽')
     expect(card).toContain('看了一场电影')
     expect(card).toContain('不提对方的家人')
+  })
+
+  it('关系状态渲染当前情绪与精力', () => {
+    const card = section(composePrompt(context()), '你们的关系') ?? ''
+    expect(card).toContain('被逗笑')
+    expect(card).toContain('70')
+  })
+
+  it('心情为空时省略情绪一行', () => {
+    const card = section(composePrompt(context({ relation: { ...relation, mood: '' } })), '你们的关系') ?? ''
+    expect(card).not.toContain('心情')
   })
 
   it('事实按 key 字典序渲染，而非输入顺序', () => {

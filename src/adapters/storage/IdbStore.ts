@@ -73,7 +73,8 @@ export class IdbStore implements MemoryStore {
 
   async getRelation(sessionId: string): Promise<Relation> {
     const existing = await this.db.relations.get(sessionId)
-    return existing ?? createDefaultRelation(sessionId, Date.now())
+    // 旧数据可能缺少后加的情绪字段，用默认值兜底后再覆盖已有字段
+    return { ...createDefaultRelation(sessionId, Date.now()), ...existing }
   }
 
   async updateRelation(sessionId: string, patch: Partial<Relation>): Promise<void> {

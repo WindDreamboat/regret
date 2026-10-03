@@ -3,7 +3,7 @@ import type { AppServices } from '../../composition/root'
 import { composePrompt } from '../../core/memory/compose'
 import { buildExtractionPrompt, parseFactOps } from '../../core/memory/extract'
 import { parseStateBlock, type StateBlock } from '../../core/memory/state'
-import type { StoredMessage } from '../../core/memory/types'
+import type { Relation, StoredMessage } from '../../core/memory/types'
 import type { Persona } from '../../core/persona/types'
 
 const SESSION_ID = 'default'
@@ -13,6 +13,8 @@ const EXTRACTION_INTERVAL_MESSAGES = 12
 
 export interface UseChatResult {
   messages: StoredMessage[]
+  /** 当前关系状态，供界面展示阶段、亲密度与情绪 */
+  relation: Relation | null
   /** 正在流式生成中的回复文本（已剥离状态块） */
   draft: string
   isGenerating: boolean
@@ -22,6 +24,7 @@ export interface UseChatResult {
 
 export function useChat(services: AppServices, persona: Persona): UseChatResult {
   const [messages, setMessages] = useState<StoredMessage[]>([])
+  const [relation, setRelation] = useState<Relation | null>(null)
   const [draft, setDraft] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -38,8 +41,13 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
 
   useEffect(() => {
     let cancelled = false
-    void services.memoryStore.listMessages(SESSION_ID).then((stored) => {
-      if (!cancelled) applyMessages(stored)
+    void Promise.all([
+      services.memoryStore.listMessages(SESSION_ID),
+      services.memoryStore.getRelation(SESSION_ID),
+    ]).then(([stored, currentRelation]) => {
+      if (cancelled) return
+      applyMessages(stored)
+      setRelation(currentRelation)
     })
     return () => {
       cancelled = true
@@ -83,12 +91,14 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
     [services],
   )
 
-  /** 把模型给出的状态块并入关系状态：亲密度按增量累加并夹在 0-100。 */
+  /** 把模型给出的状态块并入关系状态：亲密度按增量累加并夹在 0-100，同时更新情绪与精力。 */
   const applyState = useCallback(
     async (state: StateBlock) => {
-      const relation = await services.memoryStore.getRelation(SESSION_ID)
-      const intimacy = Math.min(100, Math.max(0, relation.intimacy + state.affectionDelta))
-      await services.memoryStore.updateRelation(SESSION_ID, { intimacy, updatedAt: Date.now() })
+      const current = await services.memoryStore.getRelation(SESSION_ID)
+      const intimacy = Math.min(100, Math.max(0, current.intimacy + state.affectionDelta))
+      const next = { intimacy, mood: state.mood, energy: state.energy, updatedAt: Date.now() }
+      await services.memoryStore.updateRelation(SESSION_ID, next)
+      setRelation({ ...current, ...next })
     },
     [services],
   )
@@ -164,5 +174,5 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
     [services, persona, applyMessages, applyState, runExtraction],
   )
 
-  return { messages, draft, isGenerating, error, send }
+  return { messages, relation, draft, isGenerating, error, send }
 }

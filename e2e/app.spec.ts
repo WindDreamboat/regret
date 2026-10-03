@@ -141,6 +141,19 @@ test('状态块从回复中剥离，不展示给用户也不落库', async ({ pa
   await expect(page.locator('body')).not.toContainText('<state>')
 })
 
+test('关系状态条展示阶段、亲密度与情绪，并随回复更新', async ({ page }) => {
+  await gotoApp(page)
+
+  const bar = page.getByTestId('relation-bar')
+  await expect(bar).toContainText('初识')
+  await expect(bar).toContainText('亲密度 0')
+
+  await sendMessage(page, '你好')
+
+  await expect(bar).toContainText('亲密度 1')
+  await expect(bar).toContainText('温和')
+})
+
 test('人设保存后标题变化且刷新后保留', async ({ page }) => {
   await gotoApp(page)
   await expect(page.locator('header h1')).toHaveText('虚拟伴侣')

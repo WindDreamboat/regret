@@ -11,7 +11,7 @@ export interface ChatPageProps {
 }
 
 export function ChatPage({ services, persona, onOpenPersona }: ChatPageProps) {
-  const { messages, draft, isGenerating, error, send } = useChat(services, persona)
+  const { messages, relation, draft, isGenerating, error, send } = useChat(services, persona)
   const [input, setInput] = useState('')
 
   const submit = () => {
@@ -34,6 +34,23 @@ export function ChatPage({ services, persona, onOpenPersona }: ChatPageProps) {
           人设
         </button>
       </header>
+
+      {relation !== null && (
+        <div
+          data-testid="relation-bar"
+          className="flex items-center gap-2 border-b border-neutral-800 px-4 py-1.5 text-xs text-neutral-500"
+        >
+          <span>{relation.stage}</span>
+          <span>·</span>
+          <span>亲密度 {relation.intimacy}</span>
+          {relation.mood.trim() !== '' && (
+            <>
+              <span>·</span>
+              <span>{relation.mood}</span>
+            </>
+          )}
+        </div>
+      )}
 
       <main className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 && !isGenerating && (

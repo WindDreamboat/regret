@@ -43,9 +43,10 @@ export class InMemoryStore implements MemoryStore {
 
   async getRelation(sessionId: string): Promise<Relation> {
     const existing = this.relations.get(sessionId)
+    const base = createDefaultRelation(sessionId, Date.now())
     return existing
-      ? { ...existing, sharedExperiences: [...existing.sharedExperiences], boundaries: [...existing.boundaries] }
-      : createDefaultRelation(sessionId, Date.now())
+      ? { ...base, ...existing, sharedExperiences: [...existing.sharedExperiences], boundaries: [...existing.boundaries] }
+      : base
   }
 
   async updateRelation(sessionId: string, patch: Partial<Relation>): Promise<void> {

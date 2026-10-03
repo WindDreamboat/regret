@@ -47,6 +47,10 @@ export interface Relation {
   stage: string
   /** 亲密度，0-100 */
   intimacy: number
+  /** 伴侣当前心情的自然语言描述，未产生状态块时为空串 */
+  mood: string
+  /** 伴侣当前精力，0-1 */
+  energy: number
   addressForm: string
   sharedExperiences: string[]
   boundaries: string[]
@@ -70,6 +74,8 @@ export function createDefaultRelation(sessionId: string, now: number): Relation 
     sessionId,
     stage: '初识',
     intimacy: 0,
+    mood: '',
+    energy: 0.6,
     addressForm: '',
     sharedExperiences: [],
     boundaries: [],

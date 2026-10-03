@@ -82,6 +82,12 @@ function addSection(sections: string[], title: string, value: string): void {
 function renderRelation(relation: Relation): string {
   const lines = [`你们目前处于「${relation.stage}」阶段，亲密度 ${relation.intimacy}/100。`]
 
+  const mood = relation.mood.trim()
+  if (mood !== '') {
+    const energy = Number.isFinite(relation.energy) ? `，精力 ${Math.round(relation.energy * 100)}/100` : ''
+    lines.push(`你现在的心情是「${mood}」${energy}。`)
+  }
+
   const address = relation.addressForm.trim()
   if (address !== '') lines.push(`你习惯称呼用户为「${address}」。`)
   if (relation.sharedExperiences.length > 0) {
