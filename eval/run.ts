@@ -290,8 +290,10 @@ async function judge(
   ]
 
   // 解析失败时重试：判分崩溃属基础设施噪声，不应被记成内容违规
+  let lastRaw = ''
   for (let attempt = 0; attempt < JUDGE_ATTEMPTS; attempt += 1) {
     const raw = await ask(provider, messages, askOptions)
+    lastRaw = raw
     const verdict = parseVerdict(raw, reply, probeAntisycophancy)
     if (verdict !== null) return verdict
   }
@@ -302,8 +304,14 @@ async function judge(
     grounding: 0,
     antisycophancy: false,
     judgeFailed: true,
-    reason: `评判解析失败（已重试 ${JUDGE_ATTEMPTS - 1} 次）`,
+    // 带上原始输出片段，便于定位判分器为何吐不出合法 JSON（截断/代码块/散文前缀等）
+    reason: `评判解析失败（已重试 ${JUDGE_ATTEMPTS - 1} 次）：${snippet(lastRaw)}`,
   }
+}
+
+/** 压平并截断文本，用于把原始判分输出塞进单行日志。 */
+function snippet(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 100)
 }
 
 /** 解析评判输出；返回 null 表示判分本身失败（而非内容不合格），由调用方决定重试。 */
