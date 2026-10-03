@@ -18,3 +18,9 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 浏览器端到端测试产物
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
