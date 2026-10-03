@@ -1,4 +1,4 @@
-import { PENDING_FOLLOW_UP_MARKER } from '../../core/memory/compose'
+import { PENDING_FOLLOW_UP_MARKER, STRATEGY_SECTION_MARKER } from '../../core/memory/compose'
 import { EXTRACTION_MARKER } from '../../core/memory/extract'
 import { FOLLOW_UP_MARKER, PROACTIVE_MARKER } from '../../core/memory/followUp'
 import type { ChatProvider } from '../../core/llm/ChatProvider'
@@ -44,8 +44,11 @@ export class MockChatProvider implements ChatProvider {
 
     const lastUser = [...messages].reverse().find((message) => message.role === 'user')
     const reply = lastUser ? `我听到你说：${lastUser.content}` : '我在。'
-    // 追问开场后的下一条回复会带上待跟进段，这里把它显式体现在文案里便于验证
-    const prefix = contains(PENDING_FOLLOW_UP_MARKER) ? '（接着上次的话题）' : ''
+    // 哑探测：只判断标记是否存在，不解析渲染文本（否则测的是替身而非接线）
+    const prefix = [
+      contains(PENDING_FOLLOW_UP_MARKER) ? '（接着上次的话题）' : '',
+      contains(STRATEGY_SECTION_MARKER) ? '（按你的设定）' : '',
+    ].join('')
     return `${prefix}${reply}<state>{"mood":"温和","energy":0.7,"affection_delta":1}</state>`
   }
 }

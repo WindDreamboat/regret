@@ -11,6 +11,9 @@ const WELCOME = '嗨，我在的，今天想聊点什么？'
 const FOLLOW_UP = '你之前提到的那件事，后来怎么样了？'
 const CONTINUATION_PREFIX = '（接着上次的话题）'
 
+/** 存在风格设定段时 MockChatProvider 会给回复加的前缀 */
+const STRATEGY_PREFIX = '（按你的设定）'
+
 async function gotoApp(page: Page): Promise<void> {
   await page.goto('/')
   await expect(page.locator(INPUT)).toBeVisible()
@@ -22,6 +25,39 @@ async function sendMessage(page: Page, text: string): Promise<void> {
   await page.fill(INPUT, text)
   await page.press(INPUT, 'Enter')
   await expect(page.locator(BUBBLES).last()).toHaveText(replyTo(text))
+}
+
+/** 只发送不断言：回复可能带风格前缀，期望值由调用方给出 */
+async function sendRaw(page: Page, text: string): Promise<void> {
+  await page.fill(INPUT, text)
+  await page.press(INPUT, 'Enter')
+}
+
+/**
+ * 等待 IndexedDB 中落库的消息达到指定条数。
+ *
+ * 助手气泡在流式结束时就显示完整文本，但落库发生在之后；直接 reload 会与写入竞争，
+ * 因此凡「发送后再刷新」的用例都先等落库完成。
+ */
+async function waitForStoredMessages(page: Page, count: number): Promise<void> {
+  await page.waitForFunction(
+    async (expected) => {
+      const openReq = indexedDB.open('regret')
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        openReq.onsuccess = () => resolve(openReq.result)
+        openReq.onerror = () => reject(openReq.error)
+      })
+      const total = await new Promise<number>((resolve, reject) => {
+        const request = db.transaction('messages', 'readonly').objectStore('messages').count()
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      db.close()
+      return total >= expected
+    },
+    count,
+    { timeout: 5000 },
+  )
 }
 
 /**
@@ -130,6 +166,7 @@ test('刷新后消息从 IndexedDB 恢复', async ({ page }) => {
   await gotoApp(page)
   await sendMessage(page, '你好')
   await sendMessage(page, '今天怎么样')
+  await waitForStoredMessages(page, 5)
 
   await page.reload()
 
@@ -141,6 +178,7 @@ test('刷新后消息从 IndexedDB 恢复', async ({ page }) => {
 test('状态块从回复中剥离，不展示给用户也不落库', async ({ page }) => {
   await gotoApp(page)
   await sendMessage(page, '你好')
+  await waitForStoredMessages(page, 3)
 
   const bubble = page.locator(BUBBLES).last()
   await expect(bubble).toHaveText(replyTo('你好'))
@@ -248,12 +286,75 @@ test('追问后下一条回复延续该话题，且重新打开不重复追问',
   await seedReturningUser(page)
   await expect(page.locator(BUBBLES).last()).toHaveText(FOLLOW_UP)
 
-  await page.fill(INPUT, '刚忙完，还行')
-  await page.press(INPUT, 'Enter')
+  await sendRaw(page, '刚忙完，还行')
   await expect(page.locator(BUBBLES).last()).toHaveText(`${CONTINUATION_PREFIX}${replyTo('刚忙完，还行')}`)
+  await waitForStoredMessages(page, 4)
 
   // 事件已标记追问过，再次打开不再重复追问，气泡数保持不变
   await page.reload()
   await expect(page.locator(BUBBLES)).toHaveCount(4)
   await expect(page.locator(BUBBLES).last()).toHaveText(`${CONTINUATION_PREFIX}${replyTo('刚忙完，还行')}`)
+})
+
+const openSettings = (page: Page) => page.getByRole('button', { name: '设置' }).click()
+const backToChat = (page: Page) => page.getByRole('button', { name: '返回' }).click()
+
+test('调整旋钮后回复带上风格设定，刷新后设置保留', async ({ page }) => {
+  await gotoApp(page)
+
+  // 全部默认时不注入风格段
+  await sendMessage(page, '你好')
+  await expect(page.locator(BUBBLES).last()).toHaveText(replyTo('你好'))
+
+  await openSettings(page)
+  const humor = page.getByRole('slider', { name: '幽默感' })
+  await expect(humor).toBeVisible()
+  await humor.fill('0.8')
+
+  await backToChat(page)
+  await sendRaw(page, '在吗')
+  await expect(page.locator(BUBBLES).last()).toHaveText(`${STRATEGY_PREFIX}${replyTo('在吗')}`)
+
+  // 即时生效并持久化
+  await page.reload()
+  await openSettings(page)
+  await expect(page.getByRole('slider', { name: '幽默感' })).toHaveValue('0.8')
+})
+
+test('不同意见滑块下限为 0.15', async ({ page }) => {
+  await gotoApp(page)
+  await openSettings(page)
+
+  const challenge = page.getByRole('slider', { name: '不同意见' })
+  await expect(challenge).toHaveAttribute('min', '0.15')
+  await challenge.fill('0.15')
+  await expect(challenge).toHaveValue('0.15')
+})
+
+test('恢复默认后回复不再带风格设定', async ({ page }) => {
+  await gotoApp(page)
+
+  await openSettings(page)
+  await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
+  await backToChat(page)
+  await sendRaw(page, '在吗')
+  await expect(page.locator(BUBBLES).last()).toHaveText(`${STRATEGY_PREFIX}${replyTo('在吗')}`)
+
+  await openSettings(page)
+  await page.getByRole('button', { name: '恢复默认' }).click()
+  await backToChat(page)
+
+  await sendMessage(page, '好些了吗')
+})
+
+test('界面不暴露参数名或 JSON 字面量', async ({ page }) => {
+  await gotoApp(page)
+  await openSettings(page)
+  await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
+
+  const text = await page.locator('body').innerText()
+  expect(text).not.toContain('{')
+  for (const key of ['proactivity', 'empathyDensity', 'humor', 'pace', 'verbosity', 'challenge']) {
+    expect(text).not.toContain(key)
+  }
 })
