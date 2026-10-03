@@ -64,6 +64,11 @@
   - `adapters/llm/MockChatProvider.ts`：识别开场/追问/待跟进标记，返回确定性文案。
   - 测试：单测增至 117；e2e 增至 18，新增「首次开场白」「返回访问主动追问」「追问后续延续且不重复追问」。
   - **回滚条件**：`git revert` 该功能提交；`DEFAULT_PERSONA` 仅影响无本地人设的首屏，回滚后恢复空白人设；追问相关字段与存储能力在批次 2 已存在，回滚不影响数据。
+- 迭代 3 批次 4：手工评测集与自动跑分脚本。
+  - 新增 `eval/cases.json`：25 个多轮脚本，覆盖记忆覆盖 / 改口 / 事件进展 / 出戏与人设一致性，每轮带自然语言判分标准。
+  - 新增 `eval/llm.ts` 与 `eval/run.ts`：复用 `/api/chat` 代理与真实 prompt、抽取链路回放脚本，逐轮由 LLM 按「记忆 / 人设」判分并汇总通过率；支持 `--mock` 离线冒烟、`--limit`、`--verbose`、`--min-rate`；调用带节流与指数退避重试，避免限流被误判为不通过。
+  - `package.json` 新增 `eval` 脚本与 `tsx` 开发依赖；`tsconfig.json` 的 `include` 纳入 `eval`。
+  - **回滚条件**：删除 `eval/`，移除 `eval` 脚本与 `tsx` 依赖，并从 `tsconfig.json` 的 include 移除 `eval`。评测为开发工具，不影响产品运行。
 
 ### 变更
 
@@ -81,3 +86,8 @@
   - **回滚条件**：`git checkout HEAD~1 -- .gitignore`。
 - 重写需求简报与开发里程碑文档 `docs/虚拟伴侣应用_需求简报与开发里程碑.md`。架构路线由"Rust 端侧 LAAP 移植"改为"前端 TypeScript 编排层"；记忆系统缩减为三类并取消向量检索；情绪表达改为模型输出结构化状态；里程碑重排为四个迭代并将产品验证提前；补充留存、冷启动、评测集与 API Key 代理等缺失章节。
   - **回滚条件**：`git checkout 3eb6b38 -- "docs/虚拟伴侣应用_需求简报与开发里程碑.md"`，恢复至原始方案。
+
+### 修复
+
+- `server/handler.ts`：DeepSeek Base URL 已包含 `/v1`（多数 OpenAI 兼容网关如此）时不再重复拼接，避免 `.../v1/v1/chat/completions` 导致 404；现按 Base URL 是否以 `/v1` 结尾决定拼接路径。此前该问题同时使真实网关下的对话链路与评测脚本不可用。
+  - **回滚条件**：`git revert` 该修复提交；回滚后 Base URL 必须使用不含 `/v1` 的官方形式（`https://api.deepseek.com`），否则会再次 404。
