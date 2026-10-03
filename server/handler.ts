@@ -49,10 +49,12 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
 
     const baseUrl = (env['DEEPSEEK_BASE_URL'] ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
     const model = env['DEEPSEEK_MODEL'] ?? DEFAULT_MODEL
+    // Base URL 可能已包含 /v1（多数 OpenAI 兼容网关如此），此时不再重复拼接
+    const path = baseUrl.endsWith('/v1') ? '/chat/completions' : '/v1/chat/completions'
 
     let upstream: Response
     try {
-      upstream = await fetchImpl(`${baseUrl}/v1/chat/completions`, {
+      upstream = await fetchImpl(`${baseUrl}${path}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

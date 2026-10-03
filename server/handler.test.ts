@@ -85,6 +85,32 @@ describe('createChatHandler', () => {
     })
   })
 
+  it('Base URL 已带 /v1 时不再重复拼接', async () => {
+    const fetchImpl = vi.fn<HttpFetch>(async () => sseUpstream())
+    const handler = createChatHandler({
+      env: { ...env, DEEPSEEK_BASE_URL: 'https://gw.example.com/v1' },
+      fetchImpl,
+    })
+
+    await handler(postRequest(validBody))
+
+    const [url] = fetchImpl.mock.calls[0] ?? []
+    expect(url).toBe('https://gw.example.com/v1/chat/completions')
+  })
+
+  it('Base URL 以 /v1/ 结尾时同样只保留一个 /v1', async () => {
+    const fetchImpl = vi.fn<HttpFetch>(async () => sseUpstream())
+    const handler = createChatHandler({
+      env: { ...env, DEEPSEEK_BASE_URL: 'https://gw.example.com/v1/' },
+      fetchImpl,
+    })
+
+    await handler(postRequest(validBody))
+
+    const [url] = fetchImpl.mock.calls[0] ?? []
+    expect(url).toBe('https://gw.example.com/v1/chat/completions')
+  })
+
   it('原样透传上游的流式响应', async () => {
     const handler = createChatHandler({ env, fetchImpl: async () => sseUpstream() })
 
