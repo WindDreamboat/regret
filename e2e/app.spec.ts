@@ -17,47 +17,35 @@ const STRATEGY_PREFIX = '（按你的设定）'
 async function gotoApp(page: Page): Promise<void> {
   await page.goto('/')
   await expect(page.locator(INPUT)).toBeVisible()
-  // 首次进入伴侣会自动说开场白，等它说完再继续，避免与后续发送相互打断
+  // 首次进入伴侣会自动说开场白。仅等文本出现不够：那是流式中的草稿，此时仍在生成，
+  // 后续发送会被 generatingRef 静默丢弃；因此还要等「生成中」气泡消失。
   await expect(page.locator(BUBBLES).first()).toHaveText(WELCOME)
+  await expect(page.getByTestId('pending-bubble')).toHaveCount(0)
 }
 
 async function sendMessage(page: Page, text: string): Promise<void> {
   await page.fill(INPUT, text)
   await page.press(INPUT, 'Enter')
   await expect(page.locator(BUBBLES).last()).toHaveText(replyTo(text))
+  await settleAfterSend(page)
 }
 
 /** 只发送不断言：回复可能带风格前缀，期望值由调用方给出 */
 async function sendRaw(page: Page, text: string): Promise<void> {
   await page.fill(INPUT, text)
   await page.press(INPUT, 'Enter')
+  await settleAfterSend(page)
 }
 
 /**
- * 等待 IndexedDB 中落库的消息达到指定条数。
+ * 等一次生成真正结束。
  *
- * 助手气泡在流式结束时就显示完整文本，但落库发生在之后；直接 reload 会与写入竞争，
- * 因此凡「发送后再刷新」的用例都先等落库完成。
+ * 助手气泡在流式结束时就显示完整文本，但落库与关系写入发生在其后、`isGenerating`
+ * 复位之前；若不等，紧接着刷新页面或切走视图，未落库的那条就会丢。三个状态在同一个
+ * `finally` 里复位，而「生成中」气泡是它唯一可见的表现，因此以它消失为准。
  */
-async function waitForStoredMessages(page: Page, count: number): Promise<void> {
-  await page.waitForFunction(
-    async (expected) => {
-      const openReq = indexedDB.open('regret')
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        openReq.onsuccess = () => resolve(openReq.result)
-        openReq.onerror = () => reject(openReq.error)
-      })
-      const total = await new Promise<number>((resolve, reject) => {
-        const request = db.transaction('messages', 'readonly').objectStore('messages').count()
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error)
-      })
-      db.close()
-      return total >= expected
-    },
-    count,
-    { timeout: 5000 },
-  )
+async function settleAfterSend(page: Page): Promise<void> {
+  await expect(page.getByTestId('pending-bubble')).toHaveCount(0)
 }
 
 /**
@@ -166,7 +154,6 @@ test('刷新后消息从 IndexedDB 恢复', async ({ page }) => {
   await gotoApp(page)
   await sendMessage(page, '你好')
   await sendMessage(page, '今天怎么样')
-  await waitForStoredMessages(page, 5)
 
   await page.reload()
 
@@ -178,7 +165,6 @@ test('刷新后消息从 IndexedDB 恢复', async ({ page }) => {
 test('状态块从回复中剥离，不展示给用户也不落库', async ({ page }) => {
   await gotoApp(page)
   await sendMessage(page, '你好')
-  await waitForStoredMessages(page, 3)
 
   const bubble = page.locator(BUBBLES).last()
   await expect(bubble).toHaveText(replyTo('你好'))
@@ -271,6 +257,9 @@ async function seedReturningUser(page: Page): Promise<void> {
     db.close()
   })
   await page.reload()
+  // 重新打开后伴侣会主动追问；必须等这次生成结束，否则紧接着的发送会被丢弃
+  await expect(page.locator(BUBBLES).last()).toHaveText(FOLLOW_UP)
+  await settleAfterSend(page)
 }
 
 test('重新打开且存在到期事件时伴侣主动追问', async ({ page }) => {
@@ -288,7 +277,6 @@ test('追问后下一条回复延续该话题，且重新打开不重复追问',
 
   await sendRaw(page, '刚忙完，还行')
   await expect(page.locator(BUBBLES).last()).toHaveText(`${CONTINUATION_PREFIX}${replyTo('刚忙完，还行')}`)
-  await waitForStoredMessages(page, 4)
 
   // 事件已标记追问过，再次打开不再重复追问，气泡数保持不变
   await page.reload()
