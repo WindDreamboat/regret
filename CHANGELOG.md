@@ -55,6 +55,15 @@
   - `core/memory/MemoryStore.ts` 与两个实现：新增 `markFactFollowedUp`（只改该字段，事实不存在时静默返回）。
   - 测试：单测增至 111（新增 `followUp` 10 例，extract 与两个 store 各补若干）。
   - **回滚条件**：`git revert` 该功能提交；新字段均为可选、不参与索引，无需 Dexie 迁移，回滚后旧数据不受影响，且无 UI 行为变化。
+- 迭代 3 批次 3：打开时主动开场、后续追问延续与冷启动默认人设。
+  - `core/memory/followUp.ts`：新增 `buildProactivePrompt(persona, kind, event?)`（`welcome` / `followUp`）与 `PROACTIVE_MARKER` / `FOLLOW_UP_MARKER`，复用 `compose` 的人设卡渲染。
+  - `core/memory/compose.ts`：导出 `renderPersonaCard`；`ComposeContext` 新增 `pendingFollowUp`，渲染为「你想跟进的话题」独立 system 段。
+  - `core/persona/types.ts` 与 `features/persona/personaStorage.ts`：新增 `DEFAULT_PERSONA`，首次进入（本地无人设）使用，避免冷启动面对空白；数据损坏仍退回空人设。
+  - `features/chat/useChat.ts`：打开时无消息则说欢迎语，距上次消息超 4 小时且存在到期事件（`selectFollowUp`）则主动追问，追问后落库并 `markFactFollowedUp`，把话题延续到下一条回复；用 ref 守卫规避 StrictMode 重复开场。开场独立于发消息主链路，失败只记 console。
+  - `features/chat/ChatPage.tsx`：移除「还没有对话」空态，由开场白承担。
+  - `adapters/llm/MockChatProvider.ts`：识别开场/追问/待跟进标记，返回确定性文案。
+  - 测试：单测增至 117；e2e 增至 18，新增「首次开场白」「返回访问主动追问」「追问后续延续且不重复追问」。
+  - **回滚条件**：`git revert` 该功能提交；`DEFAULT_PERSONA` 仅影响无本地人设的首屏，回滚后恢复空白人设；追问相关字段与存储能力在批次 2 已存在，回滚不影响数据。
 
 ### 变更
 
