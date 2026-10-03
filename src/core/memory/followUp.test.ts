@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest'
+import type { Persona } from '../persona/types'
 import type { Fact } from './types'
-import { FOLLOW_UP_WINDOW_MS, selectFollowUp } from './followUp'
+import {
+  buildProactivePrompt,
+  FOLLOW_UP_MARKER,
+  FOLLOW_UP_WINDOW_MS,
+  PROACTIVE_MARKER,
+  selectFollowUp,
+} from './followUp'
 
 const NOW = 10_000_000
+
+const persona: Persona = {
+  name: '小满',
+  userAddress: '你',
+  personality: '温和、爱吐槽',
+  background: '在一家旧书店工作',
+}
 
 function fact(overrides: Partial<Fact> = {}): Fact {
   return {
@@ -63,5 +77,31 @@ describe('selectFollowUp', () => {
     const facts = [fact()]
     selectFollowUp(facts, NOW)
     expect(facts).toHaveLength(1)
+  })
+})
+
+describe('buildProactivePrompt', () => {
+  it('包含人设卡与主动开场协议，且以 user 消息结尾', () => {
+    const messages = buildProactivePrompt(persona, 'welcome')
+    expect(messages[0]?.content).toContain('小满')
+    expect(messages.some((message) => message.content.includes(PROACTIVE_MARKER))).toBe(true)
+    expect(messages.at(-1)?.role).toBe('user')
+  })
+
+  it('欢迎语不含追问标记', () => {
+    const messages = buildProactivePrompt(persona, 'welcome')
+    expect(messages.some((message) => message.content.includes(FOLLOW_UP_MARKER))).toBe(false)
+  })
+
+  it('追问开场带上追问标记与事件内容', () => {
+    const messages = buildProactivePrompt(persona, 'followUp', fact({ key: 'user.interview', value: '面试' }))
+    const all = messages.map((message) => message.content).join('\n')
+    expect(all).toContain(FOLLOW_UP_MARKER)
+    expect(all).toContain('面试')
+  })
+
+  it('追问类型但缺少事件时退回欢迎语', () => {
+    const messages = buildProactivePrompt(persona, 'followUp')
+    expect(messages.some((message) => message.content.includes(FOLLOW_UP_MARKER))).toBe(false)
   })
 })

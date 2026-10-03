@@ -2,14 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppServices } from '../../composition/root'
 import { composePrompt } from '../../core/memory/compose'
 import { buildExtractionPrompt, parseFactOps } from '../../core/memory/extract'
+import { buildProactivePrompt, selectFollowUp, type ProactiveKind } from '../../core/memory/followUp'
 import { parseStateBlock, type StateBlock } from '../../core/memory/state'
-import type { Relation, StoredMessage } from '../../core/memory/types'
+import type { Fact, Relation, StoredMessage } from '../../core/memory/types'
 import type { Persona } from '../../core/persona/types'
 
 const SESSION_ID = 'default'
 
 /** 距上次抽取累计满 6 轮往返（12 条消息）才触发一次异步抽取 */
 const EXTRACTION_INTERVAL_MESSAGES = 12
+
+/** 距上次消息超过该时长（4 小时）才视为「重新打开」，可主动追问 */
+const RETURN_GAP_MS = 4 * 60 * 60 * 1000
 
 export interface UseChatResult {
   messages: StoredMessage[]
@@ -33,26 +37,15 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
   const messagesRef = useRef<StoredMessage[]>([])
   const generatingRef = useRef(false)
   const extractedCountRef = useRef(0)
+  /** 主动开场只跑一次，规避 StrictMode 下 effect 双调用 */
+  const openedRef = useRef(false)
+  /** 追问开场后待延续的话题，下一条回复带上后清除 */
+  const pendingFollowUpRef = useRef<{ value: string } | null>(null)
 
   const applyMessages = useCallback((next: StoredMessage[]) => {
     messagesRef.current = next
     setMessages(next)
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all([
-      services.memoryStore.listMessages(SESSION_ID),
-      services.memoryStore.getRelation(SESSION_ID),
-    ]).then(([stored, currentRelation]) => {
-      if (cancelled) return
-      applyMessages(stored)
-      setRelation(currentRelation)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [services, applyMessages])
 
   /**
    * 异步批量抽取事实。
@@ -103,6 +96,93 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
     [services],
   )
 
+  /**
+   * 打开 App 时的主动开场。
+   *
+   * 无消息则说欢迎语；距上次消息超过 4 小时且存在到期事件时主动追问。
+   * 独立于发消息主链路，失败只记 console；追问后把话题暂存，供下一条回复延续。
+   */
+  const runOpening = useCallback(
+    async (history: readonly StoredMessage[]) => {
+      let kind: ProactiveKind = 'welcome'
+      let event: Fact | null = null
+
+      if (history.length > 0) {
+        const lastTs = history[history.length - 1]?.ts ?? 0
+        if (Date.now() - lastTs < RETURN_GAP_MS) return
+
+        const facts = await services.memoryStore.listFacts(SESSION_ID)
+        event = selectFollowUp(facts, Date.now())
+        if (event === null) return
+        kind = 'followUp'
+      }
+
+      generatingRef.current = true
+      setIsGenerating(true)
+      try {
+        let raw = ''
+        for await (const streamEvent of services.chatProvider.stream(
+          buildProactivePrompt(persona, kind, event ?? undefined),
+        )) {
+          if (streamEvent.type === 'delta') {
+            raw += streamEvent.text
+            setDraft(parseStateBlock(raw).text)
+          } else if (streamEvent.type === 'error') {
+            setError(streamEvent.message)
+            break
+          }
+        }
+
+        const parsed = parseStateBlock(raw)
+        if (parsed.text === '') return
+
+        const opening: StoredMessage = {
+          sessionId: SESSION_ID,
+          role: 'assistant',
+          content: parsed.text,
+          ts: Date.now(),
+        }
+        await services.memoryStore.appendMessage(opening)
+        applyMessages([...messagesRef.current, opening])
+
+        if (parsed.state !== null) await applyState(parsed.state)
+
+        if (kind === 'followUp' && event !== null) {
+          await services.memoryStore.markFactFollowedUp(SESSION_ID, event.key, Date.now())
+          pendingFollowUpRef.current = { value: event.value }
+        }
+      } catch (cause) {
+        console.error('主动开场失败', cause)
+      } finally {
+        setDraft('')
+        setIsGenerating(false)
+        generatingRef.current = false
+      }
+    },
+    [services, persona, applyMessages, applyState],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const [stored, currentRelation] = await Promise.all([
+        services.memoryStore.listMessages(SESSION_ID),
+        services.memoryStore.getRelation(SESSION_ID),
+      ])
+      if (cancelled) return
+
+      applyMessages(stored)
+      setRelation(currentRelation)
+
+      if (openedRef.current) return
+      openedRef.current = true
+      await runOpening(stored)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [services, applyMessages, runOpening])
+
   const send = useCallback(
     async (text: string) => {
       const trimmed = text.trim()
@@ -131,9 +211,20 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
           services.memoryStore.listSummaries(SESSION_ID),
         ])
 
+        // 追问开场后只在下一条回复里延续该话题，随后清除
+        const followUp = pendingFollowUpRef.current
+        pendingFollowUpRef.current = null
+
         let reply = ''
         for await (const event of services.chatProvider.stream(
-          composePrompt({ persona, relation, facts, summaries, history }),
+          composePrompt({
+            persona,
+            relation,
+            facts,
+            summaries,
+            history,
+            pendingFollowUp: followUp ?? undefined,
+          }),
         )) {
           if (event.type === 'delta') {
             reply += event.text

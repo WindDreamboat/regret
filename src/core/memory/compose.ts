@@ -6,6 +6,9 @@ import type { Fact, Relation, Summary } from './types'
 /** 默认保留的历史消息条数上限 */
 export const DEFAULT_MAX_HISTORY = 40
 
+/** 待跟进话题段的标题标记，供测试替身识别延续请求 */
+export const PENDING_FOLLOW_UP_MARKER = '你想跟进的话题'
+
 const BASE_INSTRUCTION =
   '你是一位虚拟伴侣，与用户进行日常聊天陪伴。始终以第一人称口语化地回应，保持人设一致。'
 
@@ -25,6 +28,8 @@ export interface ComposeContext {
   facts: readonly Fact[]
   /** 待注入的摘要，通常为最新 1-2 条 level-1 与 1 条 level-2 */
   summaries: readonly Summary[]
+  /** 打开 App 追问后，下一条回复继续带入的话题（用户回应后即清除） */
+  pendingFollowUp?: { value: string }
   history: readonly ChatMessage[]
 }
 
@@ -54,6 +59,10 @@ export function composePrompt(context: ComposeContext, options: ComposeOptions =
 
   if (context.summaries.length > 0) sections.push(renderSummaries(context.summaries))
 
+  if (context.pendingFollowUp !== undefined) {
+    sections.push(renderPendingFollowUp(context.pendingFollowUp.value))
+  }
+
   return [
     ...sections.map((content): ChatMessage => ({ role: 'system', content })),
     ...trimHistory(context.history, maxHistory),
@@ -61,7 +70,7 @@ export function composePrompt(context: ComposeContext, options: ComposeOptions =
 }
 
 /** 渲染人设卡。空字段整节省略，保证全空人设也能产出可用提示。 */
-function renderPersonaCard(persona: Persona): string {
+export function renderPersonaCard(persona: Persona): string {
   const sections: string[] = [BASE_INSTRUCTION]
 
   addSection(sections, '你的名字', persona.name)
@@ -109,6 +118,11 @@ function renderFacts(facts: readonly Fact[]): string {
 /** 摘要渲染为独立小节，保留具体事实与情感事件。 */
 function renderSummaries(summaries: readonly Summary[]): string {
   return `# 过往对话摘要\n${summaries.map((summary) => summary.content).join('\n\n')}`
+}
+
+/** 渲染待跟进话题，促使伴侣在合适的时机继续之前问过的事。 */
+function renderPendingFollowUp(value: string): string {
+  return `# ${PENDING_FOLLOW_UP_MARKER}\n你正惦记着用户提过的「${value}」，如果合适就自然地把话题接回来，别生硬。`
 }
 
 /** 截取最近 maxHistory 条；若截断点落在伴侣发言上则丢弃，避免历史以伴侣发言开头。 */

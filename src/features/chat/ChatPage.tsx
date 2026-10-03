@@ -53,10 +53,6 @@ export function ChatPage({ services, persona, onOpenPersona }: ChatPageProps) {
       )}
 
       <main className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {messages.length === 0 && !isGenerating && (
-          <p className="mt-8 text-center text-sm text-neutral-500">还没有对话，先打个招呼吧</p>
-        )}
-
         {messages.map((message, index) => (
           <Bubble key={`${message.ts}-${index}`} role={message.role} content={message.content} />
         ))}

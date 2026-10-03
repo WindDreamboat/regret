@@ -6,9 +6,16 @@ const BUBBLES = 'main > div'
 /** MockChatProvider 会把最后一条用户消息回显成这个格式 */
 const replyTo = (text: string) => `我听到你说：${text}`
 
+/** MockChatProvider 的主动开场文案 */
+const WELCOME = '嗨，我在的，今天想聊点什么？'
+const FOLLOW_UP = '你之前提到的那件事，后来怎么样了？'
+const CONTINUATION_PREFIX = '（接着上次的话题）'
+
 async function gotoApp(page: Page): Promise<void> {
   await page.goto('/')
   await expect(page.locator(INPUT)).toBeVisible()
+  // 首次进入伴侣会自动说开场白，等它说完再继续，避免与后续发送相互打断
+  await expect(page.locator(BUBBLES).first()).toHaveText(WELCOME)
 }
 
 async function sendMessage(page: Page, text: string): Promise<void> {
@@ -48,8 +55,9 @@ test('首屏渲染应用外壳', async ({ page }) => {
 
   await gotoApp(page)
 
-  await expect(page.locator('header h1')).toHaveText('虚拟伴侣')
-  await expect(page.getByText('还没有对话，先打个招呼吧')).toBeVisible()
+  await expect(page.locator('header h1')).toHaveText('小满')
+  await expect(page.locator(BUBBLES)).toHaveCount(1)
+  await expect(page.locator(BUBBLES).first()).toHaveText(WELCOME)
   await expect(page.getByRole('button', { name: '人设' })).toBeVisible()
   await expect(page.getByRole('button', { name: '发送' })).toBeVisible()
 
@@ -82,7 +90,7 @@ test('消息按发送方分列且配色不同', async ({ page }) => {
   await sendMessage(page, '今天怎么样')
 
   const bubbles = page.locator(BUBBLES)
-  await expect(bubbles).toHaveCount(4)
+  await expect(bubbles).toHaveCount(5)
 
   const styles = await bubbles.evaluateAll((elements) =>
     elements.map((element) => {
@@ -98,19 +106,22 @@ test('消息按发送方分列且配色不同', async ({ page }) => {
   )
 
   expect(styles.map((style) => style.text)).toEqual([
+    WELCOME,
     '你好',
     replyTo('你好'),
     '今天怎么样',
     replyTo('今天怎么样'),
   ])
   expect(styles.map((style) => style.justify)).toEqual([
+    'flex-start',
     'flex-end',
     'flex-start',
     'flex-end',
     'flex-start',
   ])
 
-  const [user, assistant] = styles
+  const user = styles[1]
+  const assistant = styles[2]
   expect(user?.background).not.toBe(assistant?.background)
   expect(user?.color).not.toBe(assistant?.color)
 })
@@ -123,7 +134,7 @@ test('刷新后消息从 IndexedDB 恢复', async ({ page }) => {
   await page.reload()
 
   const bubbles = page.locator(BUBBLES)
-  await expect(bubbles).toHaveCount(4)
+  await expect(bubbles).toHaveCount(5)
   await expect(bubbles.last()).toHaveText(replyTo('今天怎么样'))
 })
 
@@ -156,7 +167,7 @@ test('关系状态条展示阶段、亲密度与情绪，并随回复更新', as
 
 test('人设保存后标题变化且刷新后保留', async ({ page }) => {
   await gotoApp(page)
-  await expect(page.locator('header h1')).toHaveText('虚拟伴侣')
+  await expect(page.locator('header h1')).toHaveText('小满')
 
   await page.getByRole('button', { name: '人设' }).click()
   await expect(page.getByText('人设配置')).toBeVisible()
@@ -164,16 +175,85 @@ test('人设保存后标题变化且刷新后保留', async ({ page }) => {
     await expect(page.getByText(label)).toBeVisible()
   }
 
-  await page.getByPlaceholder('例如：小满').fill('小满')
-  await page.getByPlaceholder('例如：温和，爱吐槽，偶尔嘴硬').fill('温和，爱吐槽')
+  await page.getByPlaceholder('例如：小满').fill('阿念')
+  await page.getByPlaceholder('例如：温和，爱吐槽，偶尔嘴硬').fill('温柔，话少')
   await page.getByRole('button', { name: '保存' }).click()
 
-  await expect(page.locator('header h1')).toHaveText('小满')
+  await expect(page.locator('header h1')).toHaveText('阿念')
 
   await page.reload()
-  await expect(page.locator('header h1')).toHaveText('小满')
+  await expect(page.locator('header h1')).toHaveText('阿念')
 
   await page.getByRole('button', { name: '人设' }).click()
-  await expect(page.getByPlaceholder('例如：小满')).toHaveValue('小满')
-  await expect(page.getByPlaceholder('例如：温和，爱吐槽，偶尔嘴硬')).toHaveValue('温和，爱吐槽')
+  await expect(page.getByPlaceholder('例如：小满')).toHaveValue('阿念')
+  await expect(page.getByPlaceholder('例如：温和，爱吐槽，偶尔嘴硬')).toHaveValue('温柔，话少')
+})
+
+/**
+ * 播种「隔天重新打开」的场景：清空消息后写入一条 8 小时前的用户消息
+ * 与一条已发生、未追问的事件事实。
+ *
+ * 必须先让应用打开数据库（等待开场白），再用原生 IndexedDB 写入，
+ * 否则会以错误版本抢先创建库，破坏 Dexie schema。
+ */
+async function seedReturningUser(page: Page): Promise<void> {
+  await gotoApp(page)
+  await page.evaluate(async () => {
+    const openReq = indexedDB.open('regret')
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      openReq.onsuccess = () => resolve(openReq.result)
+      openReq.onerror = () => reject(openReq.error)
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['messages', 'facts'], 'readwrite')
+      const messages = tx.objectStore('messages')
+      messages.clear()
+      messages.add({
+        sessionId: 'default',
+        role: 'user',
+        content: '我明天有个面试',
+        ts: Date.now() - 8 * 60 * 60 * 1000,
+      })
+      tx.objectStore('facts').put({
+        sessionId: 'default',
+        key: 'user.interview',
+        value: '面试',
+        category: 'event',
+        confidence: 0.9,
+        eventAt: Date.now() - 60 * 60 * 1000,
+        sourceMsgIds: [],
+        firstSeenAt: 0,
+        updatedAt: 0,
+        status: 'confirmed',
+      })
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+  })
+  await page.reload()
+}
+
+test('重新打开且存在到期事件时伴侣主动追问', async ({ page }) => {
+  await seedReturningUser(page)
+
+  const bubbles = page.locator(BUBBLES)
+  await expect(bubbles).toHaveCount(2)
+  await expect(bubbles.first()).toHaveText('我明天有个面试')
+  await expect(bubbles.last()).toHaveText(FOLLOW_UP)
+})
+
+test('追问后下一条回复延续该话题，且重新打开不重复追问', async ({ page }) => {
+  await seedReturningUser(page)
+  await expect(page.locator(BUBBLES).last()).toHaveText(FOLLOW_UP)
+
+  await page.fill(INPUT, '刚忙完，还行')
+  await page.press(INPUT, 'Enter')
+  await expect(page.locator(BUBBLES).last()).toHaveText(`${CONTINUATION_PREFIX}${replyTo('刚忙完，还行')}`)
+
+  // 事件已标记追问过，再次打开不再重复追问，气泡数保持不变
+  await page.reload()
+  await expect(page.locator(BUBBLES)).toHaveCount(4)
+  await expect(page.locator(BUBBLES).last()).toHaveText(`${CONTINUATION_PREFIX}${replyTo('刚忙完，还行')}`)
 })

@@ -161,6 +161,15 @@ describe('composePrompt', () => {
     expect(section(without, '摘要')).toBeUndefined()
   })
 
+  it('存在待跟进话题时渲染为独立 system 段', () => {
+    const card = section(composePrompt(context({ pendingFollowUp: { value: '面试' } })), '跟进') ?? ''
+    expect(card).toContain('面试')
+  })
+
+  it('无待跟进话题时整节省略', () => {
+    expect(section(composePrompt(context()), '跟进')).toBeUndefined()
+  })
+
   it('历史消息按原顺序接在所有 system 小节之后', () => {
     const history: ChatMessage[] = [
       { role: 'user', content: '在吗' },
