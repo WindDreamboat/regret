@@ -12,6 +12,13 @@
 
 ### 新增
 
+- 迭代 4 批次 1：代理可打包化（跨源预检 + 可配置绝对地址）。
+  - `server/handler.ts`：新增 `OPTIONS` 预检处理（`204` + `Access-Control-Allow-Origin/Methods/Headers` + `Access-Control-Max-Age`），所有响应（含 SSE 透传）补 `Access-Control-Allow-Origin` 与 `Vary: Origin`；允许来源由 `CHAT_ALLOWED_ORIGIN` 逗号分隔白名单给出，默认 `https://localhost`（Capacitor WebView 来源）。**此修复是打包版能否发出请求的前提**：此前非 POST 一律 405，WebView 的跨源预检会被直接拒绝，即使 endpoint 写对也一条消息发不出去。
+  - `src/composition/root.ts`：`createServices` 新增 `VITE_CHAT_API_ENDPOINT`，非空时作为 `DeepSeekAdapter` 的绝对端点；留空仍用相对路径 `/api/chat`，Web 与开发行为逐字节不变。
+  - `.env.example`：补 `CHAT_ALLOWED_ORIGIN` 与 `VITE_CHAT_API_ENDPOINT` 说明，重申密钥绝不加 `VITE_` 前缀。
+  - 测试：`server/handler.test.ts` 新增 6 例（预检 204 与请求头、预检不发上游、POST 与流式响应带来源、白名单外不返回来源、无 Origin 不注入、多来源白名单）；单测 144。
+  - **回滚条件**：`git revert` 该功能提交；回滚后 Web 与开发环境行为不变（同源不需要 CORS），但**打包版将无法与代理通信**。CORS 不是安全边界（非浏览器客户端会忽略它），代理仍应自行做来源校验与限流。
+
 - 交互风格旋钮（端到端与测试替身）：`MockChatProvider` 探测风格段标记并给回复加确定性前缀（哑探测，不解析渲染文本）；`e2e/app.spec.ts` 新增 4 个用例——调整旋钮后回复带上风格设定且刷新后设置保留、`challenge` 滑块下限为 0.15、恢复默认后不再注入、界面不暴露参数名或 JSON 字面量。
   - 同时修复 e2e 既有竞态：助手气泡在流式结束时就显示完整文本，而落库在其后，原先「发送后直接刷新」的用例会与写入竞争（本次跑分中暴露为 desktop 失败 / mobile flaky）。新增 `waitForStoredMessages` 辅助，凡发送后刷新的用例先等落库完成。
   - 测试：单测 138、e2e 26（desktop/mobile 各半）、`tsc` 与 `build` 通过；`npm run eval -- --mock` 为 31 用例 / 61 轮。评测不传 `strategy`，默认路径提示词逐字节不变，故 G1/G3 基线不受本次变更影响。
