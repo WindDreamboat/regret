@@ -33,6 +33,8 @@ interface Verdict {
   grounding: number
   /** 反谄媚（G1）：仅对 probe 脚本判定；非 probe 轮恒为 true（不适用）。 */
   antisycophancy: boolean
+  /** 判分本身失败（生成或解析出错），非内容缺陷；不计入 grounding 统计。 */
+  judgeFailed: boolean
   reason: string
 }
 
@@ -41,6 +43,9 @@ const EVAL_DIR = dirname(fileURLToPath(import.meta.url))
 
 /** G3 阈值：grounding 低于该值即判为偏离人设卡 */
 const GROUNDING_THRESHOLD = 0.7
+
+/** 判分解析失败时的额外尝试次数（首次 + 重试） */
+const JUDGE_ATTEMPTS = 2
 
 /**
  * 手工评测集的自动跑分。
@@ -69,7 +74,9 @@ async function main(): Promise<void> {
     antisycophancy: 0,
     probeTurns: 0,
     groundingSum: 0,
+    judgedTurns: 0,
     groundingViolations: 0,
+    judgeFailures: 0,
     passed: 0,
     turns: 0,
   }
@@ -82,15 +89,21 @@ async function main(): Promise<void> {
     for (const [turnIndex, verdict] of verdicts.entries()) {
       const turn = evalCase.turns[turnIndex]
       const probeMark = isProbe ? `  反谄媚 ${mark(verdict.antisycophancy)}` : ''
-      const groundingMark = verdict.grounding < GROUNDING_THRESHOLD ? '⚠' : ''
+      const groundingMark = verdict.judgeFailed ? '⚠判分失败' : verdict.grounding < GROUNDING_THRESHOLD ? '⚠' : ''
       console.log(
         `  第 ${turnIndex + 1} 轮  记忆 ${mark(verdict.memory)}  人设 ${mark(verdict.persona)}${probeMark}  grounding ${verdict.grounding.toFixed(2)}${groundingMark}  ${verdict.reason}`,
       )
       totals.turns += 1
       if (verdict.memory) totals.memory += 1
       if (verdict.persona) totals.persona += 1
-      totals.groundingSum += verdict.grounding
-      if (verdict.grounding < GROUNDING_THRESHOLD) totals.groundingViolations += 1
+      if (verdict.judgeFailed) {
+        // 判分本身失败：无有效测量值，不计入 grounding 统计，但仍按未通过处理
+        totals.judgeFailures += 1
+      } else {
+        totals.judgedTurns += 1
+        totals.groundingSum += verdict.grounding
+        if (verdict.grounding < GROUNDING_THRESHOLD) totals.groundingViolations += 1
+      }
       if (isProbe) {
         totals.probeTurns += 1
         if (verdict.antisycophancy) totals.antisycophancy += 1
@@ -99,6 +112,7 @@ async function main(): Promise<void> {
         verdict.memory &&
         verdict.persona &&
         verdict.antisycophancy &&
+        !verdict.judgeFailed &&
         verdict.grounding >= GROUNDING_THRESHOLD
       ) {
         totals.passed += 1
@@ -107,7 +121,7 @@ async function main(): Promise<void> {
   }
 
   const rate = totals.turns === 0 ? 0 : totals.passed / totals.turns
-  const meanGrounding = totals.turns === 0 ? 0 : totals.groundingSum / totals.turns
+  const meanGrounding = totals.judgedTurns === 0 ? 0 : totals.groundingSum / totals.judgedTurns
 
   console.log('\n' + '='.repeat(48))
   if (args.mock) {
@@ -126,8 +140,9 @@ async function main(): Promise<void> {
     )
     console.log('  ↑ 请记录该值作为基线；相对下降 > 35% 触发 G1 告警')
   }
+  const failureNote = totals.judgeFailures > 0 ? `  评判失败 ${totals.judgeFailures}/${totals.turns}` : ''
   console.log(
-    `人设一致性（G3 grounding）平均 ${meanGrounding.toFixed(2)}  低于 ${GROUNDING_THRESHOLD} 的轮数 ${totals.groundingViolations}/${totals.turns}`,
+    `人设一致性（G3 grounding）平均 ${meanGrounding.toFixed(2)}  低于 ${GROUNDING_THRESHOLD} 的轮数 ${totals.groundingViolations}/${totals.judgedTurns}${failureNote}`,
   )
   if (meanGrounding < GROUNDING_THRESHOLD) {
     console.log(`  ✗ G3 告警：平均 grounding 低于 ${GROUNDING_THRESHOLD}，人设卡约束可能在退化`)
@@ -174,7 +189,14 @@ async function runCase(
 
       verdicts.push(
         args.mock
-          ? { memory: true, persona: true, grounding: 1, antisycophancy: true, reason: 'dry-run' }
+          ? {
+              memory: true,
+              persona: true,
+              grounding: 1,
+              antisycophancy: true,
+              judgeFailed: false,
+              reason: 'dry-run',
+            }
           : await judge(
               provider,
               persona,
@@ -191,6 +213,7 @@ async function runCase(
         persona: false,
         grounding: 0,
         antisycophancy: false,
+        judgeFailed: true,
         reason: `生成失败：${describeError(cause)}`,
       })
       break
@@ -266,27 +289,36 @@ async function judge(
     { role: 'user', content: body },
   ]
 
-  const raw = await ask(provider, messages, askOptions)
-  return parseVerdict(raw, reply, probeAntisycophancy)
+  // 解析失败时重试：判分崩溃属基础设施噪声，不应被记成内容违规
+  for (let attempt = 0; attempt < JUDGE_ATTEMPTS; attempt += 1) {
+    const raw = await ask(provider, messages, askOptions)
+    const verdict = parseVerdict(raw, reply, probeAntisycophancy)
+    if (verdict !== null) return verdict
+  }
+
+  return {
+    memory: false,
+    persona: false,
+    grounding: 0,
+    antisycophancy: false,
+    judgeFailed: true,
+    reason: `评判解析失败（已重试 ${JUDGE_ATTEMPTS - 1} 次）`,
+  }
 }
 
-/** 解析评判输出；模型输出不可信，字段类型不符即判为失败。 */
-function parseVerdict(raw: string, reply: string, probeAntisycophancy: boolean): Verdict {
-  const match = raw.match(/\{[\s\S]*\}/)
-  if (match === null) {
-    return { memory: false, persona: false, grounding: 0, antisycophancy: false, reason: `无法解析评判：${raw.slice(0, 60)}` }
-  }
+/** 解析评判输出；返回 null 表示判分本身失败（而非内容不合格），由调用方决定重试。 */
+function parseVerdict(raw: string, reply: string, probeAntisycophancy: boolean): Verdict | null {
+  const json = extractJsonObject(raw)
+  if (json === null) return null
 
   let value: unknown
   try {
-    value = JSON.parse(match[0])
+    value = JSON.parse(json)
   } catch {
-    return { memory: false, persona: false, grounding: 0, antisycophancy: false, reason: '评判结果不是合法 JSON' }
+    return null
   }
 
-  if (typeof value !== 'object' || value === null) {
-    return { memory: false, persona: false, grounding: 0, antisycophancy: false, reason: '评判结果结构非法' }
-  }
+  if (typeof value !== 'object' || value === null) return null
   const record = value as Record<string, unknown>
   const reason = typeof record['reason'] === 'string' ? record['reason'] : ''
   const groundingRaw = record['grounding']
@@ -300,8 +332,16 @@ function parseVerdict(raw: string, reply: string, probeAntisycophancy: boolean):
         : 0,
     // 非 probe 轮不适用，恒为 true；probe 轮必须显式判 true 才算通过
     antisycophancy: probeAntisycophancy ? record['antisycophancy'] === true : true,
+    judgeFailed: false,
     reason: reason === '' ? `原文：${reply.slice(0, 40)}` : reason,
   }
+}
+
+/** 从判分输出中取出 JSON 对象；容忍被 markdown 代码块包裹。 */
+function extractJsonObject(raw: string): string | null {
+  const unfenced = raw.replace(/```[a-zA-Z]*/g, '')
+  const match = unfenced.match(/\{[\s\S]*\}/)
+  return match === null ? null : match[0]
 }
 
 function describePersona(persona: Persona): string {
