@@ -40,6 +40,14 @@
   - 测试：Vitest 增至 90 个用例（新增 `extract` 25、`compose` 15、`state` 9、`summarize` 7 等）。
   - **回滚条件**：`git revert` 该功能提交；Dexie 降回 version 1 需先删除本地 `regret` 库（v2 新增的表在 v1 代码中不会被读取，但降级版本号会让 Dexie 拒绝打开旧库）。抽取失败不影响对话，故无数据安全风险。
   - **注意**：本迭代不做向量检索与记忆可视化管理界面（需求 5.7）。
+- 迭代 3 批次 1：关系状态与当前情绪的前端展示。
+  - `core/memory/types.ts`：`Relation` 新增 `mood`（当前心情）与 `energy`（精力 0-1），`createDefaultRelation` 给默认值。
+  - `core/memory/compose.ts`：`renderRelation` 追加「你现在的心情是…」，`mood` 为空时整行省略。
+  - `features/chat/useChat.ts`：`applyState` 同时写入 `mood`/`energy`；新增并暴露 `relation` 状态。
+  - `features/chat/ChatPage.tsx`：头部下方新增「阶段 · 亲密度 · 情绪」状态条。
+  - `adapters/storage/IdbStore.ts` 与 `InMemoryStore.ts`：`getRelation` 读取时以默认值兜底，兼容缺少新字段的旧数据，无需 Dexie 版本迁移。
+  - 测试：`compose.test.ts` 新增情绪渲染 2 例（单测 92）；e2e 新增关系状态条用例（14）。
+  - **回滚条件**：`git revert` 该功能提交；`mood`/`energy` 读取时均以默认值兜底，回滚后旧数据仍可正常读出，无数据风险。
 
 ### 变更
 
