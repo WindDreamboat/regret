@@ -6,6 +6,7 @@ import { buildProactivePrompt, selectFollowUp, type ProactiveKind } from '../../
 import { parseStateBlock, type StateBlock } from '../../core/memory/state'
 import type { Fact, Relation, StoredMessage } from '../../core/memory/types'
 import type { Persona } from '../../core/persona/types'
+import type { StrategyProfile } from '../../core/strategy/types'
 
 const SESSION_ID = 'default'
 
@@ -26,7 +27,11 @@ export interface UseChatResult {
   send: (text: string) => Promise<void>
 }
 
-export function useChat(services: AppServices, persona: Persona): UseChatResult {
+export function useChat(
+  services: AppServices,
+  persona: Persona,
+  strategy: StrategyProfile,
+): UseChatResult {
   const [messages, setMessages] = useState<StoredMessage[]>([])
   const [relation, setRelation] = useState<Relation | null>(null)
   const [draft, setDraft] = useState('')
@@ -222,6 +227,7 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
             relation,
             facts,
             summaries,
+            strategy,
             history,
             pendingFollowUp: followUp ?? undefined,
           }),
@@ -262,7 +268,7 @@ export function useChat(services: AppServices, persona: Persona): UseChatResult 
         generatingRef.current = false
       }
     },
-    [services, persona, applyMessages, applyState, runExtraction],
+    [services, persona, strategy, applyMessages, applyState, runExtraction],
   )
 
   return { messages, relation, draft, isGenerating, error, send }

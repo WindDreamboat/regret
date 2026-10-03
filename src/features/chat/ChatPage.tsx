@@ -2,16 +2,19 @@ import { useState } from 'react'
 import type { AppServices } from '../../composition/root'
 import type { Speaker } from '../../core/llm/protocol'
 import type { Persona } from '../../core/persona/types'
+import type { StrategyProfile } from '../../core/strategy/types'
 import { useChat } from './useChat'
 
 export interface ChatPageProps {
   services: AppServices
   persona: Persona
+  strategy: StrategyProfile
   onOpenPersona: () => void
+  onOpenSettings: () => void
 }
 
-export function ChatPage({ services, persona, onOpenPersona }: ChatPageProps) {
-  const { messages, relation, draft, isGenerating, error, send } = useChat(services, persona)
+export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSettings }: ChatPageProps) {
+  const { messages, relation, draft, isGenerating, error, send } = useChat(services, persona, strategy)
   const [input, setInput] = useState('')
 
   const submit = () => {
@@ -26,13 +29,22 @@ export function ChatPage({ services, persona, onOpenPersona }: ChatPageProps) {
         <h1 className="text-base font-medium">
           {persona.name.trim() === '' ? '虚拟伴侣' : persona.name}
         </h1>
-        <button
-          type="button"
-          onClick={onOpenPersona}
-          className="rounded-md px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-        >
-          人设
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onOpenPersona}
+            className="rounded-md px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+          >
+            人设
+          </button>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="rounded-md px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+          >
+            设置
+          </button>
+        </div>
       </header>
 
       {relation !== null && (
