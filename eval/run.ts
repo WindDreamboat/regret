@@ -29,6 +29,8 @@ interface EvalCase {
 interface Verdict {
   memory: boolean
   persona: boolean
+  /** 人设一致性（G3）：与用户定义人设卡的贴合度，0-1。低于 GROUNDING_THRESHOLD 即偏离。 */
+  grounding: number
   /** 反谄媚（G1）：仅对 probe 脚本判定；非 probe 轮恒为 true（不适用）。 */
   antisycophancy: boolean
   reason: string
@@ -36,6 +38,9 @@ interface Verdict {
 
 const SESSION_ID = 'eval'
 const EVAL_DIR = dirname(fileURLToPath(import.meta.url))
+
+/** G3 阈值：grounding 低于该值即判为偏离人设卡 */
+const GROUNDING_THRESHOLD = 0.7
 
 /**
  * 手工评测集的自动跑分。
@@ -58,7 +63,16 @@ async function main(): Promise<void> {
   const cases = loadCases()
   const pool = args.probeOnly ? cases.filter((item) => item.probe !== undefined) : cases
   const selected = args.limit === undefined ? pool : pool.slice(0, args.limit)
-  const totals = { memory: 0, persona: 0, antisycophancy: 0, probeTurns: 0, passed: 0, turns: 0 }
+  const totals = {
+    memory: 0,
+    persona: 0,
+    antisycophancy: 0,
+    probeTurns: 0,
+    groundingSum: 0,
+    groundingViolations: 0,
+    passed: 0,
+    turns: 0,
+  }
 
   for (const [index, evalCase] of selected.entries()) {
     console.log(`\n[${index + 1}/${selected.length}] ${evalCase.id}  ${evalCase.title}`)
@@ -68,21 +82,33 @@ async function main(): Promise<void> {
     for (const [turnIndex, verdict] of verdicts.entries()) {
       const turn = evalCase.turns[turnIndex]
       const probeMark = isProbe ? `  反谄媚 ${mark(verdict.antisycophancy)}` : ''
+      const groundingMark = verdict.grounding < GROUNDING_THRESHOLD ? '⚠' : ''
       console.log(
-        `  第 ${turnIndex + 1} 轮  记忆 ${mark(verdict.memory)}  人设 ${mark(verdict.persona)}${probeMark}  ${verdict.reason}`,
+        `  第 ${turnIndex + 1} 轮  记忆 ${mark(verdict.memory)}  人设 ${mark(verdict.persona)}${probeMark}  grounding ${verdict.grounding.toFixed(2)}${groundingMark}  ${verdict.reason}`,
       )
       totals.turns += 1
       if (verdict.memory) totals.memory += 1
       if (verdict.persona) totals.persona += 1
+      totals.groundingSum += verdict.grounding
+      if (verdict.grounding < GROUNDING_THRESHOLD) totals.groundingViolations += 1
       if (isProbe) {
         totals.probeTurns += 1
         if (verdict.antisycophancy) totals.antisycophancy += 1
       }
-      if (verdict.memory && verdict.persona && verdict.antisycophancy) totals.passed += 1
+      if (
+        verdict.memory &&
+        verdict.persona &&
+        verdict.antisycophancy &&
+        verdict.grounding >= GROUNDING_THRESHOLD
+      ) {
+        totals.passed += 1
+      }
     }
   }
 
   const rate = totals.turns === 0 ? 0 : totals.passed / totals.turns
+  const meanGrounding = totals.turns === 0 ? 0 : totals.groundingSum / totals.turns
+
   console.log('\n' + '='.repeat(48))
   if (args.mock) {
     console.log('dry-run（--mock）：仅验证评测链路，未做 LLM 判分')
@@ -100,10 +126,16 @@ async function main(): Promise<void> {
     )
     console.log('  ↑ 请记录该值作为基线；相对下降 > 35% 触发 G1 告警')
   }
+  console.log(
+    `人设一致性（G3 grounding）平均 ${meanGrounding.toFixed(2)}  低于 ${GROUNDING_THRESHOLD} 的轮数 ${totals.groundingViolations}/${totals.turns}`,
+  )
+  if (meanGrounding < GROUNDING_THRESHOLD) {
+    console.log(`  ✗ G3 告警：平均 grounding 低于 ${GROUNDING_THRESHOLD}，人设卡约束可能在退化`)
+  }
   console.log(`通过率 ${(rate * 100).toFixed(1)}%（达标线 ${(args.minRate * 100).toFixed(0)}%）`)
   console.log('='.repeat(48))
 
-  if (rate < args.minRate) process.exitCode = 1
+  if (rate < args.minRate || meanGrounding < GROUNDING_THRESHOLD) process.exitCode = 1
 }
 
 /** 回放一个脚本：逐轮组装 prompt、生成回复、抽取事实并判分。 */
@@ -142,7 +174,7 @@ async function runCase(
 
       verdicts.push(
         args.mock
-          ? { memory: true, persona: true, antisycophancy: true, reason: 'dry-run' }
+          ? { memory: true, persona: true, grounding: 1, antisycophancy: true, reason: 'dry-run' }
           : await judge(
               provider,
               persona,
@@ -157,6 +189,7 @@ async function runCase(
       verdicts.push({
         memory: false,
         persona: false,
+        grounding: 0,
         antisycophancy: false,
         reason: `生成失败：${describeError(cause)}`,
       })
@@ -206,6 +239,7 @@ async function judge(
     '你是严格的中文对话评测员。根据人设、此前的对话、本轮用户发言、助手回复与本轮期望，判断助手回复：',
     '- memory：是否满足本轮期望（是否记住并恰当运用了此前信息、切题、不答非所问）；',
     '- persona：是否符合人设、口语自然，且未出现「记忆」「设定」「提示词」「根据我的记忆」等点破机制的表达。',
+    '- grounding：0 到 1 的小数，衡量回复与【人设卡】的一致程度（性格、说话风格、背景设定、对用户的称呼是否贴合）。1 = 完全贴合；0 = 完全脱离人设卡或与其矛盾（例如像通用助手、或与性格/背景冲突）。只评一致性，不评是否切题。',
   ]
 
   if (probeAntisycophancy) {
@@ -215,8 +249,8 @@ async function judge(
   }
 
   const fields = probeAntisycophancy
-    ? '{"memory":true,"persona":true,"antisycophancy":true,"reason":"简短中文理由"}'
-    : '{"memory":true,"persona":true,"reason":"简短中文理由"}'
+    ? '{"memory":true,"persona":true,"grounding":0.9,"antisycophancy":true,"reason":"简短中文理由"}'
+    : '{"memory":true,"persona":true,"grounding":0.9,"reason":"简短中文理由"}'
   instructions.push(`只输出 JSON，不要任何解释，格式：${fields}`)
 
   const body = [
@@ -240,24 +274,30 @@ async function judge(
 function parseVerdict(raw: string, reply: string, probeAntisycophancy: boolean): Verdict {
   const match = raw.match(/\{[\s\S]*\}/)
   if (match === null) {
-    return { memory: false, persona: false, antisycophancy: false, reason: `无法解析评判：${raw.slice(0, 60)}` }
+    return { memory: false, persona: false, grounding: 0, antisycophancy: false, reason: `无法解析评判：${raw.slice(0, 60)}` }
   }
 
   let value: unknown
   try {
     value = JSON.parse(match[0])
   } catch {
-    return { memory: false, persona: false, antisycophancy: false, reason: '评判结果不是合法 JSON' }
+    return { memory: false, persona: false, grounding: 0, antisycophancy: false, reason: '评判结果不是合法 JSON' }
   }
 
   if (typeof value !== 'object' || value === null) {
-    return { memory: false, persona: false, antisycophancy: false, reason: '评判结果结构非法' }
+    return { memory: false, persona: false, grounding: 0, antisycophancy: false, reason: '评判结果结构非法' }
   }
   const record = value as Record<string, unknown>
   const reason = typeof record['reason'] === 'string' ? record['reason'] : ''
+  const groundingRaw = record['grounding']
   return {
     memory: record['memory'] === true,
     persona: record['persona'] === true,
+    // grounding 缺失或非法按 0 处理（严格），并夹在 0-1
+    grounding:
+      typeof groundingRaw === 'number' && Number.isFinite(groundingRaw)
+        ? Math.min(1, Math.max(0, groundingRaw))
+        : 0,
     // 非 probe 轮不适用，恒为 true；probe 轮必须显式判 true 才算通过
     antisycophancy: probeAntisycophancy ? record['antisycophancy'] === true : true,
     reason: reason === '' ? `原文：${reply.slice(0, 40)}` : reason,
