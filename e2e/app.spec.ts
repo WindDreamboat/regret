@@ -127,6 +127,20 @@ test('刷新后消息从 IndexedDB 恢复', async ({ page }) => {
   await expect(bubbles.last()).toHaveText(replyTo('今天怎么样'))
 })
 
+test('状态块从回复中剥离，不展示给用户也不落库', async ({ page }) => {
+  await gotoApp(page)
+  await sendMessage(page, '你好')
+
+  const bubble = page.locator(BUBBLES).last()
+  await expect(bubble).toHaveText(replyTo('你好'))
+  await expect(page.locator('body')).not.toContainText('<state>')
+  await expect(page.locator('body')).not.toContainText('affection_delta')
+
+  await page.reload()
+  await expect(page.locator(BUBBLES).last()).toHaveText(replyTo('你好'))
+  await expect(page.locator('body')).not.toContainText('<state>')
+})
+
 test('人设保存后标题变化且刷新后保留', async ({ page }) => {
   await gotoApp(page)
   await expect(page.locator('header h1')).toHaveText('虚拟伴侣')

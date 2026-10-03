@@ -54,3 +54,84 @@ describe('IdbStore', () => {
     expect(stored?.ts).toBe(300)
   })
 })
+
+describe('IdbStore 记忆方法', () => {
+  it('应用事实操作后可读回，且同 key 覆盖', async () => {
+    const store = freshStore()
+    await store.applyFactOps(
+      's1',
+      [{ op: 'upsert', key: 'user.drink', value: '拿铁', category: 'preference', confidence: 0.9 }],
+      100,
+    )
+    await store.applyFactOps(
+      's1',
+      [{ op: 'upsert', key: 'user.drink', value: '美式', category: 'preference', confidence: 0.9 }],
+      200,
+    )
+
+    const facts = await store.listFacts('s1')
+
+    expect(facts).toHaveLength(1)
+    expect(facts[0]?.value).toBe('美式')
+    expect(facts[0]?.firstSeenAt).toBe(100)
+    expect(facts[0]?.updatedAt).toBe(200)
+  })
+
+  it('按会话隔离事实', async () => {
+    const store = freshStore()
+    await store.applyFactOps(
+      's1',
+      [{ op: 'upsert', key: 'user.drink', value: '拿铁', category: 'preference', confidence: 0.9 }],
+      100,
+    )
+
+    expect(await store.listFacts('s2')).toEqual([])
+  })
+
+  it('delete 操作移除事实', async () => {
+    const store = freshStore()
+    await store.applyFactOps(
+      's1',
+      [{ op: 'upsert', key: 'user.drink', value: '拿铁', category: 'preference', confidence: 0.9 }],
+      100,
+    )
+    await store.applyFactOps('s1', [{ op: 'delete', key: 'user.drink' }], 200)
+
+    expect(await store.listFacts('s1')).toEqual([])
+  })
+
+  it('关系状态未初始化时返回默认值，更新后合并补丁', async () => {
+    const store = freshStore()
+    expect((await store.getRelation('s1')).intimacy).toBe(0)
+
+    await store.updateRelation('s1', { intimacy: 30, stage: '熟悉' })
+
+    const relation = await store.getRelation('s1')
+    expect(relation.intimacy).toBe(30)
+    expect(relation.stage).toBe('熟悉')
+    expect(relation.sessionId).toBe('s1')
+  })
+
+  it('摘要按时间升序返回，且按会话隔离', async () => {
+    const store = freshStore()
+    await store.appendSummary('s1', {
+      sessionId: 's1',
+      level: 1,
+      coversFromId: 1,
+      coversToId: 20,
+      content: '后',
+      ts: 200,
+    })
+    await store.appendSummary('s1', {
+      sessionId: 's1',
+      level: 1,
+      coversFromId: 21,
+      coversToId: 40,
+      content: '先',
+      ts: 100,
+    })
+
+    expect((await store.listSummaries('s1')).map((item) => item.content)).toEqual(['先', '后'])
+    expect(await store.listSummaries('s2')).toEqual([])
+  })
+})

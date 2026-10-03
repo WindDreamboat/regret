@@ -1,3 +1,4 @@
+import { EXTRACTION_MARKER } from '../../core/memory/extract'
 import type { ChatProvider } from '../../core/llm/ChatProvider'
 import type { ChatMessage, StreamEvent } from '../../core/llm/protocol'
 
@@ -6,7 +7,7 @@ export interface MockChatProviderOptions {
   delayMs?: number
 }
 
-/** 开发与测试用的假 provider：把最后一条用户消息逐字回显。 */
+/** 开发与测试用的假 provider：把最后一条用户消息逐字回显，并附带一行状态块。 */
 export class MockChatProvider implements ChatProvider {
   private readonly delayMs: number
 
@@ -15,10 +16,7 @@ export class MockChatProvider implements ChatProvider {
   }
 
   async *stream(messages: ChatMessage[]): AsyncIterable<StreamEvent> {
-    const lastUser = [...messages].reverse().find((message) => message.role === 'user')
-    const reply = lastUser ? `我听到你说：${lastUser.content}` : '我在。'
-
-    for (const char of reply) {
+    for (const char of this.replyTo(messages)) {
       if (this.delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, this.delayMs))
       }
@@ -26,5 +24,14 @@ export class MockChatProvider implements ChatProvider {
     }
 
     yield { type: 'done' }
+  }
+
+  private replyTo(messages: ChatMessage[]): string {
+    // 抽取请求走同一条流式通道，返回空 ops 以免污染主对话链路
+    if (messages[0]?.content.includes(EXTRACTION_MARKER)) return '{"ops":[]}'
+
+    const lastUser = [...messages].reverse().find((message) => message.role === 'user')
+    const reply = lastUser ? `我听到你说：${lastUser.content}` : '我在。'
+    return `${reply}<state>{"mood":"温和","energy":0.7,"affection_delta":1}</state>`
   }
 }
