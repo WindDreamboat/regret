@@ -27,30 +27,28 @@ export function PersonaPanel({ persona, onChange }: PersonaPanelProps) {
   }
 
   return (
-    <div className="space-y-5">
-      <p className="text-xs leading-relaxed text-faint">
+    <div className="space-y-6">
+      <p className="text-note leading-relaxed text-faint">
         她是谁、怎么称呼你，都由你定。改动立即生效——下一次开口就是新的她。
       </p>
 
       {FIELDS.map((field) => (
         <label key={field.key} className="block">
-          <span className="mb-1.5 block text-xs font-medium tracking-wide text-muted">
-            {field.label}
-          </span>
+          <span className="group-label block text-note font-medium text-muted">{field.label}</span>
           {field.multiline ? (
             <textarea
               rows={3}
               value={persona[field.key]}
               placeholder={field.placeholder}
               onChange={(event) => update(field.key, event.target.value)}
-              className="field resize-none px-3.5 py-2.5 text-sm leading-relaxed"
+              className="field-line mt-1 resize-none py-2 text-body"
             />
           ) : (
             <input
               value={persona[field.key]}
               placeholder={field.placeholder}
               onChange={(event) => update(field.key, event.target.value)}
-              className="field px-3.5 py-2.5 text-sm"
+              className="field-line mt-1 py-2.5 text-body"
             />
           )}
         </label>

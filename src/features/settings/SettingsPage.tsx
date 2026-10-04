@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import type { SaveResult } from '../../adapters/files/fileSave'
 import type { AppServices } from '../../composition/root'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../../core/llm/config'
 import type { Persona } from '../../core/persona/types'
 import { CHALLENGE_MIN, DEFAULT_STRATEGY, type StrategyProfile } from '../../core/strategy/types'
+import type { ThemePreference } from '../../core/theme'
 import { PersonaPanel } from '../persona/PersonaPanel'
 import { clearConversation, exportMemoryBackup, resetToFactory } from './dataManagement'
 
@@ -17,6 +18,9 @@ export interface SettingsPageProps {
   strategy: StrategyProfile
   chatConfig: ChatConfig
   persona: Persona
+  theme: ThemePreference
+  /** 即时生效：点一下即换，并落盘 */
+  onChangeTheme: (theme: ThemePreference) => void
   /** 即时生效：改一个字符就回写，无保存按钮 */
   onChangePersona: (persona: Persona) => void
   /** 即时生效：滑块一变就回写，无保存按钮 */
@@ -33,13 +37,21 @@ export interface SettingsPageProps {
  * 原先是一长条（旋钮 → 连接 → 数据），加上人设后会更长；现在按"你要改的是什么"切成四类，
  * 每次只呈现一类，进入即生效——设置页没有"保存"仪式。
  */
-type Category = 'persona' | 'voice' | 'connection' | 'data'
+type Category = 'persona' | 'voice' | 'appearance' | 'connection' | 'data'
 
 const CATEGORIES: readonly { key: Category; label: string }[] = [
   { key: 'persona', label: '人设' },
   { key: 'voice', label: '说话方式' },
+  { key: 'appearance', label: '外观' },
   { key: 'connection', label: '连接' },
   { key: 'data', label: '数据' },
+]
+
+/** 三选一，够用：多一个"自动"之类的中间态只会让人猜它到底怎么算 */
+const THEME_OPTIONS: readonly { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
 ]
 
 interface KnobSpec {
@@ -105,6 +117,8 @@ export function SettingsPage({
   strategy,
   chatConfig,
   persona,
+  theme,
+  onChangeTheme,
   onChangePersona,
   onChangeStrategy,
   onChangeChatConfig,
@@ -161,11 +175,11 @@ export function SettingsPage({
     <>
       <header className="safe-top px-5 pb-4">
         <div className="flex items-center justify-between gap-4">
-          <h1 className="text-[1.0625rem] font-medium tracking-[0.01em] text-text">设置</h1>
+          <h1 className="text-title font-medium tracking-[-0.01em] text-text">设置</h1>
           <button
             type="button"
             onClick={onBack}
-            className="-mr-2 rounded-full px-3 py-2 text-sm text-muted transition-colors duration-150 hover:text-accent-text active:bg-surface"
+            className="-mr-2 rounded-full px-3 py-2 text-body text-muted transition-colors duration-150 hover:text-accent-text active:bg-surface"
           >
             返回
           </button>
@@ -184,7 +198,7 @@ export function SettingsPage({
                 aria-selected={active}
                 onClick={() => setCategory(item.key)}
                 className={[
-                  'relative shrink-0 px-3 pb-3 pt-1 text-sm transition-colors duration-150',
+                  'relative shrink-0 px-3 pb-3 pt-1 text-body transition-colors duration-150',
                   active ? 'text-text' : 'text-faint hover:text-muted',
                 ].join(' ')}
               >
@@ -209,22 +223,31 @@ export function SettingsPage({
         {category === 'persona' && <PersonaPanel persona={persona} onChange={onChangePersona} />}
 
         {category === 'voice' && (
-          <div className="space-y-6">
-            <p className="text-xs leading-relaxed text-faint">
+          <div className="space-y-7">
+            <p className="text-note leading-relaxed text-faint">
               这些旋钮决定她怎么说话，拖动即生效。
             </p>
 
             {KNOBS.map((knob) => {
               const value = strategy[knob.key]
               const min = knob.key === 'challenge' ? CHALLENGE_MIN : 0
+              const band = bandOf(value, DEFAULT_STRATEGY[knob.key])
+              // 轨道上已走过的部分：`--fill` 交给 index.css 的 .range 画
+              const fill = `${((value - min) / (1 - min)) * 100}%`
               return (
                 <div key={knob.key}>
                   <div className="mb-2.5 flex items-baseline justify-between gap-3">
-                    <label htmlFor={`strategy-${knob.key}`} className="text-sm text-text">
+                    <label htmlFor={`strategy-${knob.key}`} className="text-body text-text">
                       {knob.label}
                     </label>
-                    <span className="text-xs tabular-nums text-faint">
-                      {bandOf(value, DEFAULT_STRATEGY[knob.key])}
+                    {/* 六项都写着"默认"时，那一列就是噪声；只在偏离默认时让它亮一点 */}
+                    <span
+                      className={[
+                        'text-note tabular-nums',
+                        band === '默认' ? 'text-faint' : 'text-muted',
+                      ].join(' ')}
+                    >
+                      {band}
                     </span>
                   </div>
                   <input
@@ -235,18 +258,19 @@ export function SettingsPage({
                     step={0.05}
                     value={value}
                     onChange={(event) => onChangeStrategy({ ...strategy, [knob.key]: Number(event.target.value) })}
+                    style={{ '--fill': fill } as CSSProperties}
                     className="range w-full"
                   />
-                  <p className="mt-2 text-xs leading-relaxed text-faint">{knob.hint}</p>
+                  <p className="mt-2 text-note leading-relaxed text-faint">{knob.hint}</p>
                 </div>
               )
             })}
 
-            <div className="border-t border-line pt-5">
+            <div className="border-t border-line pt-4">
               <button
                 type="button"
                 onClick={onReset}
-                className="w-full rounded-full py-2.5 text-sm text-muted transition-colors duration-150 hover:bg-surface hover:text-text"
+                className="w-full rounded-full py-2.5 text-body text-muted transition-colors duration-150 hover:bg-surface hover:text-text"
               >
                 恢复默认
               </button>
@@ -254,25 +278,83 @@ export function SettingsPage({
           </div>
         )}
 
+        {category === 'appearance' && (
+          <div className="space-y-6">
+            <p className="text-note leading-relaxed text-faint">
+              白天浅色、夜里深色，或者干脆跟着手机走——都由你定，改完立刻生效。
+            </p>
+
+            <div>
+              <span className="group-label block text-note font-medium text-muted">主题</span>
+              <div
+                role="radiogroup"
+                aria-label="主题"
+                className="mt-3 flex gap-1 rounded-full bg-surface p-1"
+              >
+                {THEME_OPTIONS.map((option) => {
+                  const active = theme === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => onChangeTheme(option.value)}
+                      className={[
+                        'flex-1 rounded-full py-2 text-note transition-colors duration-150',
+                        active ? 'bg-surface-raised text-text' : 'text-faint hover:text-muted',
+                      ].join(' ')}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="mt-3 text-note leading-relaxed text-faint">
+                {theme === 'system'
+                  ? '现在跟着手机走：手机切到深色模式，这里也跟着变。'
+                  : '已钉死：手机切深色模式不会影响这里。'}
+              </p>
+            </div>
+          </div>
+        )}
+
         {category === 'connection' && (
-          <div className="space-y-4">
-            <p className="text-xs leading-relaxed text-faint">
+          <div className="space-y-6">
+            <p className="text-note leading-relaxed text-faint">
               在这里填就不必改程序里的配置文件。密钥只保存在这台设备，不会写进安装包。
             </p>
 
             <label className="block">
-              <span className="mb-1.5 block text-xs font-medium tracking-wide text-muted">对话服务</span>
-              <select
-                value={chatConfig.provider}
-                onChange={(event) =>
-                  patchChatConfig({ provider: event.target.value as ChatProviderKind })
-                }
-                className="field px-3.5 py-2.5 text-sm"
-              >
-                <option value="mock">演示模式（本地回声）</option>
-                <option value="direct">真实模型（直连厂商）</option>
-                <option value="deepseek">真实模型（走自建代理）</option>
-              </select>
+              <span className="group-label block text-note font-medium text-muted">对话服务</span>
+              {/* 下拉用底线的同一套语言，靠右侧一个小箭头表明"这行可以点开" */}
+              <div className="relative mt-1">
+                <select
+                  value={chatConfig.provider}
+                  onChange={(event) =>
+                    patchChatConfig({ provider: event.target.value as ChatProviderKind })
+                  }
+                  className="field-line appearance-none py-2.5 pr-7 text-body"
+                >
+                  <option value="mock">演示模式（本地回声）</option>
+                  <option value="direct">真实模型（直连厂商）</option>
+                  <option value="deepseek">真实模型（走自建代理）</option>
+                </select>
+                <svg
+                  aria-hidden
+                  viewBox="0 0 16 16"
+                  className="pointer-events-none absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-faint"
+                  fill="none"
+                >
+                  <path
+                    d="M4 6.5 8 10.5 12 6.5"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
             </label>
 
             <ConfigField
@@ -321,16 +403,17 @@ export function SettingsPage({
 
         {category === 'data' && (
           <div className="space-y-5">
-            <p className="text-xs leading-relaxed text-faint">
+            <p className="text-note leading-relaxed text-faint">
               备份带得走，也能随时清干净。所有内容都只留在这台设备上。
             </p>
 
+            {/* 这一页唯一的主操作，给实心按钮：原先那只空心大胶囊又大又空，像占位符 */}
             <button
               type="button"
               onClick={() =>
                 void runDataAction(async () => describeExport(await exportMemoryBackup(services)))
               }
-              className="w-full rounded-full border border-line-strong py-2.5 text-sm text-text transition-colors duration-150 hover:border-accent-line hover:bg-accent-soft"
+              className="w-full rounded-full bg-accent py-3.5 text-body font-medium text-accent-ink transition-transform duration-150 ease-[var(--ease-out-quart)] active:scale-[0.99]"
             >
               导出记忆备份
             </button>
@@ -338,7 +421,7 @@ export function SettingsPage({
             {/* 结果提示刻意保持中性：强调色底在浅色主题下与下面的危险操作红字难以区分，
                 「已保存」看起来像报警（真机截图确认） */}
             {dataNotice !== null && (
-              <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-xs leading-relaxed text-muted">
+              <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-note leading-relaxed text-muted">
                 {dataNotice}
               </p>
             )}
@@ -360,7 +443,7 @@ export function SettingsPage({
             </div>
 
             {dataError !== null && (
-              <p className="rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-xs leading-relaxed text-danger-text">
+              <p className="rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-note leading-relaxed text-danger-text">
                 {dataError}
               </p>
             )}
@@ -387,7 +470,7 @@ function DangerRow({ label, hint, confirmLabel, onConfirm }: DangerRowProps) {
       <button
         type="button"
         onClick={() => setArmed(true)}
-        className="w-full border-t border-line py-3.5 text-left text-sm text-danger-text transition-colors duration-150 first:border-t-0 hover:bg-danger-soft"
+        className="w-full border-t border-line py-3.5 text-left text-body text-danger-text transition-colors duration-150 first:border-t-0 hover:bg-danger-soft"
       >
         {label}
       </button>
@@ -426,7 +509,7 @@ interface ConfigFieldProps {
   hint?: string
 }
 
-/** 连接配置的单个输入项：标签 + 输入框（可选说明）；改动即回写，无保存按钮。 */
+/** 连接配置的单个输入项：标签 + 一条底线上的输入（可选说明）；改动即回写，无保存按钮。 */
 function ConfigField({
   label,
   value,
@@ -437,17 +520,17 @@ function ConfigField({
 }: ConfigFieldProps) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium tracking-wide text-muted">{label}</span>
+      <span className="group-label block text-note font-medium text-muted">{label}</span>
       <input
         type={type}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         autoComplete="off"
-        className="field px-3.5 py-2.5 text-sm"
+        className="field-line mt-1 py-2.5 text-body"
       />
       {hint !== undefined && (
-        <span className="mt-1.5 block text-xs leading-relaxed text-faint">{hint}</span>
+        <span className="mt-2 block text-note leading-relaxed text-faint">{hint}</span>
       )}
     </label>
   )

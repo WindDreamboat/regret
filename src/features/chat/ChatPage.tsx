@@ -49,14 +49,14 @@ export function ChatPage({ services, persona, strategy, onOpenSettings }: ChatPa
       <header className="safe-top px-5 pb-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="flex items-center gap-2 truncate text-[1.0625rem] font-medium tracking-[0.01em] text-text">
+            <h1 className="flex items-center gap-2 truncate text-title font-medium tracking-[-0.01em] text-text">
               <span aria-hidden className="presence" />
               {name}
             </h1>
             {relation !== null && (
               <p
                 data-testid="relation-bar"
-                className="mt-1.5 text-xs leading-5 text-faint"
+                className="mt-1.5 text-note leading-5 tabular-nums text-faint"
               >
                 <span className="text-accent-text">{relation.stage}</span>
                 <Separator />
@@ -74,20 +74,27 @@ export function ChatPage({ services, persona, strategy, onOpenSettings }: ChatPa
           <button
             type="button"
             onClick={onOpenSettings}
-            className="-mr-2 shrink-0 rounded-full px-3 py-2 text-sm text-muted transition-colors duration-150 hover:text-accent-text active:bg-surface"
+            className="-mr-2 shrink-0 rounded-full px-3 py-2 text-body text-muted transition-colors duration-150 hover:text-accent-text active:bg-surface"
           >
             设置
           </button>
         </div>
       </header>
 
-      {/* min-h-0：flex 子项默认 min-height:auto，不写它就算有 overflow 也不会收缩 */}
+      {/*
+        min-h-0：flex 子项默认 min-height:auto，不写它就算有 overflow 也不会收缩。
+
+        对话贴着输入栏往上长，而不是从标题下方开始往下堆：短对话时下方一大片空白，
+        整页看着像"没写完的文档"（截图确认）。用首个子项的 margin-top:auto 把它顶到底部；
+        内容变长后 auto 自动归零，因此不像 justify-content:flex-end 那样会把顶部内容
+        挤出可滚区域。
+      */}
       <main
         ref={scrollRef}
         className="scroll-slim flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-4"
       >
         {hiddenCount > 0 && (
-          <p className="pb-3 text-center text-xs text-faint">
+          <p className="mt-auto pb-3 text-center text-note text-faint">
             更早的 {hiddenCount} 条仍保存在本地
           </p>
         )}
@@ -100,6 +107,8 @@ export function ChatPage({ services, persona, strategy, onOpenSettings }: ChatPa
               role={message.role}
               content={message.content}
               first={previous === undefined || previous.role !== message.role}
+              /* 上方那条提示已经在顶着了，第一条气泡就不必再顶一次 */
+              anchor={index === 0 && hiddenCount === 0}
             />
           )
         })}
@@ -115,7 +124,7 @@ export function ChatPage({ services, persona, strategy, onOpenSettings }: ChatPa
         )}
 
         {error !== null && (
-          <p className="mt-3 rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-sm leading-relaxed text-danger-text">
+          <p className="mt-3 rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-note leading-relaxed text-danger-text">
             {error}
           </p>
         )}
@@ -132,7 +141,7 @@ export function ChatPage({ services, persona, strategy, onOpenSettings }: ChatPa
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="说点什么…"
-          className="field min-w-0 flex-1 px-4 py-3 text-sm leading-5"
+          className="field min-w-0 flex-1 px-4 py-3 text-body leading-5"
         />
         <button
           type="submit"
@@ -171,23 +180,25 @@ interface BubbleProps {
   first: boolean
   pending?: boolean
   testId?: string
+  /** 第一条消息额外承担"把整段对话顶到底部"的职责，见 main 里的说明 */
+  anchor?: boolean
 }
 
-function Bubble({ role, content, first, pending = false, testId }: BubbleProps) {
+function Bubble({ role, content, first, pending = false, testId, anchor = false }: BubbleProps) {
   const isUser = role === 'user'
 
   return (
     <div
       className={[
         'flex',
-        first ? 'mt-4' : 'mt-1',
+        anchor ? 'mt-auto' : first ? 'mt-4' : 'mt-1',
         isUser ? 'justify-end' : 'justify-start',
       ].join(' ')}
       data-testid={testId}
     >
       <div
         className={[
-          'bubble rise-in max-w-[78%] whitespace-pre-wrap px-4 py-2.5 text-sm leading-[1.7]',
+          'bubble rise-in max-w-[78%] whitespace-pre-wrap px-4 py-2.5 text-body',
           isUser
             ? 'bubble-from-you bg-accent-soft text-text'
             : 'bubble-from-her bg-surface text-text',

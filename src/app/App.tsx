@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { applyTheme, watchSystemTheme } from './theme'
 import { createServices } from '../composition/root'
 import { normalizeChatConfig, type ChatConfig } from '../core/llm/config'
 import type { Persona } from '../core/persona/types'
 import { DEFAULT_STRATEGY, normalizeStrategy, type StrategyProfile } from '../core/strategy/types'
+import { normalizeTheme, type ThemePreference } from '../core/theme'
 import { ChatPage } from '../features/chat/ChatPage'
 import { loadPersona, savePersona } from '../features/persona/personaStorage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { loadChatConfig, saveChatConfig } from '../features/settings/chatConfigStorage'
 import { loadStrategy, saveStrategy } from '../features/settings/strategyStorage'
+import { loadTheme, saveTheme } from '../features/settings/themeStorage'
 
 type View = 'chat' | 'settings'
 
@@ -23,7 +26,28 @@ export function App() {
   const services = useMemo(() => createServices(chatConfig), [chatConfig])
   const [persona, setPersona] = useState<Persona>(() => loadPersona())
   const [strategy, setStrategy] = useState<StrategyProfile>(() => loadStrategy())
+  const [theme, setTheme] = useState<ThemePreference>(() => loadTheme())
   const [view, setView] = useState<View>('chat')
+
+  /**
+   * 主题即时生效：写 `<html data-theme>`、浏览器主题色与 Android 状态栏。
+   *
+   * 首屏不依赖这里——index.html 的内联脚本已在样式生效前把属性写好（否则冷启动会闪一下），
+   * 这一段负责的是"切换"与"系统明暗变了"这两件事。
+   */
+  useEffect(() => {
+    applyTheme(theme)
+    // 只有「跟随系统」才需要盯着系统；钉死明暗时系统怎么变都与我们无关
+    if (theme !== 'system') return
+    return watchSystemTheme(() => applyTheme('system'))
+  }, [theme])
+
+  /** 主题偏好即时生效：点一下即换并落盘，与其余配置一致 */
+  const handleChangeTheme = (next: ThemePreference) => {
+    const normalized = normalizeTheme(next)
+    setTheme(normalized)
+    saveTheme(normalized)
+  }
 
   /** 人设即时生效：改一个字符就回写，与旋钮、连接配置一致，不再有"保存"仪式 */
   const handleChangePersona = (next: Persona) => {
@@ -66,6 +90,8 @@ export function App() {
           strategy={strategy}
           chatConfig={chatConfig}
           persona={persona}
+          theme={theme}
+          onChangeTheme={handleChangeTheme}
           onChangePersona={handleChangePersona}
           onChangeStrategy={handleChangeStrategy}
           onChangeChatConfig={handleChangeChatConfig}

@@ -3,10 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <!-- 与画布同色，避免加载瞬间与浏览器/系统 UI 之间出现色带 -->
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1e191b" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f6f4" />
+    <!-- 与画布同色（--c-canvas），避免加载瞬间与浏览器/系统 UI 之间出现色带；
+         当前主题由下面的内联脚本与 app/theme.ts 改写 -->
+    <meta name="theme-color" content="#110a0a" />
     <title>虚拟伴侣</title>
+    <script>
+      /*
+        首屏防闪。
+
+        主题由 <html data-theme> 驱动，若等模块脚本加载完再设，冷启动会先按默认（暗）
+        画一帧再跳变——夜里切到浅色时那道白光尤其刺眼。这里在样式生效前先把属性写好。
+
+        权威实现是 src/app/theme.ts 的 applyTheme/resolveTheme，这段内联脚本只是它的
+        提前量：规则必须一致（localStorage 键名、system 的解析方式、两个画布色值）。
+      */
+      void (function () {
+        try {
+          var preference = localStorage.getItem('regret.theme')
+          if (preference !== 'light' && preference !== 'dark') {
+            preference = window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark'
+          }
+          var root = document.documentElement
+          root.dataset.theme = preference
+          root.style.colorScheme = preference
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute('content', preference === 'dark' ? '#110a0a' : '#f4eae9')
+        } catch (error) {
+          /* 存储不可用（隐私模式）就交给默认的暗色 */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -306,7 +306,7 @@ test('追问后下一条回复延续该话题，且重新打开不重复追问',
  */
 const openSettings = async (
   page: Page,
-  category?: '人设' | '说话方式' | '连接' | '数据',
+  category?: '人设' | '说话方式' | '外观' | '连接' | '数据',
 ): Promise<void> => {
   await page.getByRole('button', { name: '设置' }).click()
   if (category !== undefined) await page.getByRole('tab', { name: category }).click()
@@ -596,4 +596,51 @@ test('恢复出厂设置会清掉连接配置', async ({ page }) => {
   await expect(page.getByLabel('对话服务')).toHaveValue('mock')
   await expect(page.getByLabel('代理地址')).toHaveValue('')
   await expect(page.getByLabel('模型名')).toHaveValue('')
+})
+
+test('主题可切换：立即生效、刷新后保留、还能交回系统', async ({ page }) => {
+  /**
+   * 画布令牌的亮度。
+   *
+   * `getComputedStyle` 对 oklch 会原样回 `oklch(...)`，字符串没法比大小，
+   * 所以把令牌光栅化成一个像素再读——与 `.trae/audit-contrast.mjs` 同一套办法。
+   */
+  const canvasBrightness = () =>
+    page.evaluate(() => {
+      const probe = document.createElement('canvas')
+      probe.width = probe.height = 1
+      const context = probe.getContext('2d')
+      if (context === null) return 0
+      const token = getComputedStyle(document.documentElement).getPropertyValue('--c-canvas')
+      context.fillStyle = '#000000'
+      context.fillStyle = token.trim()
+      context.fillRect(0, 0, 1, 1)
+      return Array.from(context.getImageData(0, 0, 1, 1).data).reduce((sum, value) => sum + value, 0)
+    })
+
+  await gotoApp(page)
+  // Playwright 默认模拟浅色系统；默认偏好是「跟随系统」，因此首屏应当是浅色
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  const lightBrightness = await canvasBrightness()
+
+  await openSettings(page, '外观')
+  await page.getByRole('radio', { name: '深色' }).click()
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  // 令牌真的换了，不只是属性变了
+  expect(await canvasBrightness()).toBeLessThan(lightBrightness)
+  // 浏览器主题色与画布同色：这两处 hex 是手写的（CSS 用 oklch、JS 用 hex），最容易改一边忘另一边
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#110a0a')
+
+  await page.reload()
+  await expect(page.locator(INPUT)).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+
+  await openSettings(page, '外观')
+  await expect(page.getByRole('radio', { name: '深色' })).toHaveAttribute('aria-checked', 'true')
+
+  // 交回系统：又跟着模拟的浅色系统走
+  await page.getByRole('radio', { name: '跟随系统' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f4eae9')
 })
