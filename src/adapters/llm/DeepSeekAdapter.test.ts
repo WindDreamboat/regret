@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { DEFAULT_DIRECT_MODEL } from '../../core/llm/config'
 import type { ChatMessage, StreamEvent } from '../../core/llm/protocol'
 import { DeepSeekAdapter, type FetchLike } from './DeepSeekAdapter'
 
@@ -140,5 +141,193 @@ describe('DeepSeekAdapter', () => {
 
     const [, init] = fetchImpl.mock.calls[0] ?? []
     expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+  })
+
+  it('代理模式不把模型名与流式开关放进请求体，交给代理补', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({ model: 'flash', fetchImpl })
+
+    await collect(adapter.stream(messages))
+
+    const [, init] = fetchImpl.mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).toEqual({ messages })
+  })
+})
+
+describe('DeepSeekAdapter 直连模式', () => {
+  const directRequest = async (options: { model?: string; endpoint?: string; apiKey?: string }) => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://api.deepseek.com/v1/chat/completions',
+      ...options,
+      fetchImpl,
+    })
+
+    await collect(adapter.stream(messages))
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    return { url, init, fetchImpl }
+  }
+
+  it('模型名与流式开关由客户端写进请求体，只带 Authorization', async () => {
+    const { url, init } = await directRequest({ model: 'deepseek-reasoner', apiKey: 'sk-1' })
+
+    expect(url).toBe('https://api.deepseek.com/v1/chat/completions')
+    expect(init?.headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer sk-1',
+    })
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: 'deepseek-reasoner',
+      messages,
+      stream: true,
+    })
+  })
+
+  it('模型名留空时用直连默认值，且不发 X-Chat-* 头', async () => {
+    const { init } = await directRequest({})
+
+    expect(JSON.parse(String(init?.body)).model).toBe(DEFAULT_DIRECT_MODEL)
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+  })
+
+  it('未填接口地址时不发请求，给出去设置页填写的提示', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({ mode: 'direct', fetchImpl })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(events).toEqual([
+      { type: 'error', message: expect.stringContaining('接口地址') },
+    ])
+  })
+
+  it('接口非 2xx 时报「接口返回」，与代理模式的文案区分', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse([], 401))
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://api.deepseek.com/v1/chat/completions',
+      fetchImpl,
+    })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(events).toEqual([{ type: 'error', message: '接口返回 401' }])
+  })
+
+  it('直连也解析 OpenAI 兼容的 SSE', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () =>
+      sseResponse([deltaChunk('晚'), deltaChunk('上好'), 'data: [DONE]\n\n']),
+    )
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://api.deepseek.com/v1/chat/completions',
+      fetchImpl,
+    })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(textOf(events)).toBe('晚上好')
+    expect(events.at(-1)).toEqual({ type: 'done' })
+  })
+})
+
+describe('DeepSeekAdapter 原生回退', () => {
+  const corsBlocked = new TypeError('Failed to fetch')
+
+  it('浏览器被跨域拦下时，改由原生传输把请求发出去', async () => {
+    const nativeFetch = vi.fn<FetchLike>(async () =>
+      sseResponse([deltaChunk('原生'), deltaChunk('也能通'), 'data: [DONE]\n\n']),
+    )
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://gateway.example.com/api/v1/chat/completions',
+      nativeFetch,
+      fetchImpl: vi.fn<FetchLike>(async () => {
+        throw corsBlocked
+      }),
+    })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(textOf(events)).toBe('原生也能通')
+    expect(events.at(-1)).toEqual({ type: 'done' })
+  })
+
+  it('回退时把同一份请求头与请求体交给原生层', async () => {
+    const nativeFetch = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const fetchImpl = vi.fn<FetchLike>(async () => {
+      throw corsBlocked
+    })
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://gateway.example.com/api/v1/chat/completions',
+      apiKey: 'sk-1',
+      nativeFetch,
+      fetchImpl,
+    })
+
+    await collect(adapter.stream(messages))
+
+    const [, init] = nativeFetch.mock.calls[0] ?? []
+    expect(init?.headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer sk-1',
+    })
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model: DEFAULT_DIRECT_MODEL,
+      stream: true,
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('浏览器 fetch 正常时不走原生层——逐字流优先', async () => {
+    const nativeFetch = vi.fn<FetchLike>(async () => sseResponse([deltaChunk('不该出现')]))
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://api.deepseek.com/v1/chat/completions',
+      nativeFetch,
+      fetchImpl: vi.fn<FetchLike>(async () => sseResponse([deltaChunk('浏览器'), 'data: [DONE]\n\n'])),
+    })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(textOf(events)).toBe('浏览器')
+    expect(nativeFetch).not.toHaveBeenCalled()
+  })
+
+  it('相对地址（代理模式的默认 /api/chat）不回退，直接报错', async () => {
+    const nativeFetch = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({
+      nativeFetch,
+      fetchImpl: vi.fn<FetchLike>(async () => {
+        throw corsBlocked
+      }),
+    })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(nativeFetch).not.toHaveBeenCalled()
+    expect(events).toEqual([{ type: 'error', message: '请求失败：Failed to fetch' }])
+  })
+
+  it('原生传输也失败时同样给出可读错误', async () => {
+    const nativeFetch = vi.fn<FetchLike>(async () => {
+      throw new Error('Unable to resolve host')
+    })
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://gateway.example.com/api/v1/chat/completions',
+      nativeFetch,
+      fetchImpl: vi.fn<FetchLike>(async () => {
+        throw corsBlocked
+      }),
+    })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(events).toEqual([{ type: 'error', message: '请求失败：Unable to resolve host' }])
   })
 })

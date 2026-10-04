@@ -1,22 +1,41 @@
-/** 对话服务提供方：`mock` 为本地回声（默认），`deepseek` 走自建代理。 */
-export type ChatProviderKind = 'mock' | 'deepseek'
+/**
+ * 对话服务提供方。
+ *
+ * - `mock`：本地回声，默认值，没有密钥也能跑通完整链路
+ * - `deepseek`：走自建代理（协议由 `server/handler.ts` 定义，连接配置随请求头透传）
+ * - `direct`：App 直接调厂商接口，不需要部署代理，但厂商必须允许跨源访问
+ */
+export type ChatProviderKind = 'mock' | 'deepseek' | 'direct'
+
+const PROVIDER_KINDS: readonly ChatProviderKind[] = ['mock', 'deepseek', 'direct']
+
+/**
+ * 直连模式的兜底模型名。
+ *
+ * 直连时模型名由客户端写进请求体，留空会让厂商按自己的默认模型处理、结果不可预期，
+ * 因此给一个确定的兜底值。
+ */
+export const DEFAULT_DIRECT_MODEL = 'deepseek-chat'
 
 /**
  * 连接配置。
  *
  * 全部可在设置页填写，因此这里处于不可信边界（localStorage）。字符串为空表示
- * 「交给默认」：代理地址留空用相对路径 `/api/chat`，Key / 网关地址 / 模型名留空
- * 则由代理侧的环境变量提供。
+ * 「交给默认」，含义随提供方而变：
+ *
+ * - `deepseek`（代理）：接口地址留空用相对路径 `/api/chat`，Key / 网关地址 / 模型名
+ *   留空则由代理侧的环境变量提供
+ * - `direct`（直连）：接口地址与 Key 都必须填，模型名留空用 `DEFAULT_DIRECT_MODEL`
  */
 export interface ChatConfig {
   provider: ChatProviderKind
-  /** 代理地址；空串表示用默认相对路径 */
+  /** 接口地址：代理模式下是自建代理，直连模式下是厂商的完整接口地址 */
   endpoint: string
-  /** API Key；空串表示由代理侧环境变量提供 */
+  /** API Key；代理模式下空串表示由代理侧环境变量提供，直连模式下必填 */
   apiKey: string
-  /** 上游网关地址；空串表示由代理侧环境变量提供 */
+  /** 上游网关地址（仅代理模式使用）；空串表示由代理侧环境变量提供 */
   baseUrl: string
-  /** 模型名；空串表示由代理侧环境变量提供 */
+  /** 模型名；空串在代理模式下由代理侧提供，直连模式下用 DEFAULT_DIRECT_MODEL */
   model: string
 }
 
@@ -55,12 +74,19 @@ export function normalizeChatConfig(input: unknown): ChatConfig {
   const record = input as Record<string, unknown>
 
   return {
-    provider: record['provider'] === 'deepseek' ? 'deepseek' : 'mock',
+    provider: readProvider(record['provider']),
     endpoint: readUrlLike(record['endpoint']),
     apiKey: readText(record['apiKey']),
     baseUrl: readUrlLike(record['baseUrl']),
     model: readText(record['model']),
   }
+}
+
+/** 枚举外的值一律退回 `mock`：认不出的提供方宁可回声，也不静默发真实请求。 */
+function readProvider(value: unknown): ChatProviderKind {
+  return typeof value === 'string' && PROVIDER_KINDS.includes(value as ChatProviderKind)
+    ? (value as ChatProviderKind)
+    : 'mock'
 }
 
 function readText(value: unknown): string {

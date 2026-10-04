@@ -8,10 +8,16 @@ describe('normalizeChatConfig', () => {
     }
   })
 
-  it('provider 非枚举值退回 mock，deepseek 原样保留', () => {
-    expect(normalizeChatConfig({ provider: 'hacker' }).provider).toBe('mock')
-    expect(normalizeChatConfig({ provider: 'mock' }).provider).toBe('mock')
-    expect(normalizeChatConfig({ provider: 'deepseek' }).provider).toBe('deepseek')
+  it('provider 枚举值原样保留', () => {
+    for (const provider of ['mock', 'deepseek', 'direct'] as const) {
+      expect(normalizeChatConfig({ provider }).provider).toBe(provider)
+    }
+  })
+
+  it('provider 非枚举值退回 mock', () => {
+    for (const invalid of ['hacker', 'Direct', '', 1, null, undefined]) {
+      expect(normalizeChatConfig({ provider: invalid }).provider).toBe('mock')
+    }
   })
 
   it('文本字段去空白，缺失字段为空串', () => {

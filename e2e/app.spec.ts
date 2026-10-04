@@ -439,6 +439,99 @@ test('设置页填写的连接配置刷新后保留', async ({ page }) => {
   await expect(page.getByLabel('模型名')).toHaveValue('flash')
 })
 
+test('切到直连后直接请求厂商接口，配置刷新后保留', async ({ page }) => {
+  const posts: Array<{
+    url: string
+    authorization?: string
+    body: Record<string, unknown>
+    chatHeaders: string[]
+  }> = []
+
+  // 直连模式会真的打到厂商域名，这里拦下来并补上跨源头，避免测试依赖外网
+  await page.route('https://api.deepseek.com/**', async (route) => {
+    const request = route.request()
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+        },
+      })
+      return
+    }
+
+    const headers = request.headers()
+    posts.push({
+      url: request.url(),
+      ...(headers['authorization'] !== undefined ? { authorization: headers['authorization'] } : {}),
+      body: JSON.parse(request.postData() ?? '{}') as Record<string, unknown>,
+      chatHeaders: Object.keys(headers).filter((name) => name.startsWith('x-chat-')),
+    })
+    await route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'Access-Control-Allow-Origin': '*' },
+      body: 'data: {"choices":[{"delta":{"content":"直连成功"}}]}\n\ndata: [DONE]\n\n',
+    })
+  })
+
+  await gotoApp(page)
+  await openSettings(page)
+
+  // 演示模式与走代理都展示代理侧字段
+  await expect(page.getByLabel('代理地址')).toBeVisible()
+  await expect(page.getByLabel('网关地址')).toBeVisible()
+
+  await page.getByLabel('对话服务').selectOption('direct')
+  // 逐字输入：地址字段每敲一个字都会过一遍规范化，不能把还没敲完的前缀当场抹掉
+  // （真机实测曾把 "https:" 吃掉，输入框里只剩 "//…"）
+  await page.getByLabel('接口地址').pressSequentially('https://api.deepseek.com/v1/chat/completions')
+  await page.getByLabel('API Key').fill('sk-direct')
+  await page.getByLabel('模型名').fill('deepseek-reasoner')
+
+  // 「网关地址」是代理侧概念，直连时不再出现
+  await expect(page.getByLabel('网关地址')).toHaveCount(0)
+  await expect(page.getByLabel('接口地址')).toHaveValue(
+    'https://api.deepseek.com/v1/chat/completions',
+  )
+
+  await backToChat(page)
+  await sendRaw(page, '在吗')
+  await expect(page.locator(BUBBLES).last()).toHaveText('直连成功')
+
+  // 中间没有自建代理：模型名与流式开关由客户端写进请求体，也不带 X-Chat-* 约定头
+  expect(posts).toHaveLength(1)
+  expect(posts[0]?.url).toBe('https://api.deepseek.com/v1/chat/completions')
+  expect(posts[0]?.authorization).toBe('Bearer sk-direct')
+  expect(posts[0]?.body).toMatchObject({ model: 'deepseek-reasoner', stream: true })
+  expect(Array.isArray(posts[0]?.body['messages'])).toBe(true)
+  expect(posts[0]?.chatHeaders).toEqual([])
+
+  await page.reload()
+  await openSettings(page)
+
+  await expect(page.getByLabel('对话服务')).toHaveValue('direct')
+  await expect(page.getByLabel('接口地址')).toHaveValue(
+    'https://api.deepseek.com/v1/chat/completions',
+  )
+  await expect(page.getByLabel('API Key')).toHaveValue('sk-direct')
+  await expect(page.getByLabel('模型名')).toHaveValue('deepseek-reasoner')
+})
+
+test('地址字段填了非法值时给出提示', async ({ page }) => {
+  await gotoApp(page)
+  await openSettings(page)
+
+  const warning = page.getByText('这个地址没生效：只能以 http(s):// 或 / 开头')
+
+  await page.getByLabel('代理地址').fill('ftp://proxy.example.com/api/chat')
+  await expect(warning).toBeVisible()
+
+  await page.getByLabel('代理地址').fill('https://proxy.example.com/api/chat')
+  await expect(warning).toHaveCount(0)
+})
+
 test('恢复出厂设置会清掉连接配置', async ({ page }) => {
   await gotoApp(page)
   await openSettings(page)

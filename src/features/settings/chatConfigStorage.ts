@@ -6,12 +6,14 @@ const STORAGE_KEY = 'regret.chatConfig'
  * 构建期 `.env` 提供的默认值。
  *
  * 仅在页面从未配置过时使用，保证 Web 与开发环境的既有行为逐字节不变。密钥类变量
- * 没有 `VITE_` 前缀、前端拿不到，因此只能留空并回退到代理侧。
+ * 没有 `VITE_` 前缀、前端拿不到，因此只能留空：代理模式下由代理侧兜底，直连模式下
+ * 需要用户在设置页自行填写。`VITE_CHAT_PROVIDER` 的合法值由 `normalizeChatConfig`
+ * 兜住，写错（含 undefined）即回落到 `mock`。
  */
 function envDefaults(): ChatConfig {
   return normalizeChatConfig({
     ...DEFAULT_CHAT_CONFIG,
-    provider: import.meta.env.VITE_CHAT_PROVIDER === 'deepseek' ? 'deepseek' : 'mock',
+    provider: import.meta.env.VITE_CHAT_PROVIDER,
     endpoint: import.meta.env.VITE_CHAT_API_ENDPOINT ?? '',
   })
 }
