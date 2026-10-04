@@ -373,7 +373,7 @@ test('界面不暴露参数名或 JSON 字面量', async ({ page }) => {
   }
 })
 
-test('导出记忆备份会触发下载', async ({ page }) => {
+test('导出记忆备份会触发下载，并把结果说出来', async ({ page }) => {
   await gotoApp(page)
   await sendMessage(page, '你好')
   await openSettings(page, '数据')
@@ -382,7 +382,12 @@ test('导出记忆备份会触发下载', async ({ page }) => {
   await page.getByRole('button', { name: '导出记忆备份' }).click()
   const download = await downloadPromise
 
-  expect(download.suggestedFilename()).toMatch(/^regret-backup-\d{4}-\d{2}-\d{2}\.json$/)
+  const fileName = download.suggestedFilename()
+  expect(fileName).toMatch(/^regret-backup-\d{4}-\d{2}-\d{2}\.json$/)
+
+  // 浏览器这条路落点不由我们决定，界面要把"去哪找"说清楚——
+  // 真机上曾经点完毫无动静，用户无法分辨成功与失败
+  await expect(page.getByText(`已导出 ${fileName}，可在「下载」里找到`)).toBeVisible()
 })
 
 test('清除对话与记忆后回到开场，人设与说话方式保留', async ({ page }) => {

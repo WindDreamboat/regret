@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 走 SAF 的 ACTION_CREATE_DOCUMENT，不需要任何权限，因此这里没有要声明的东西 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

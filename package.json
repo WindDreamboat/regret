@@ -19,6 +19,7 @@
   "dependencies": {
     "@capacitor/android": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "@regret/file-save": "file:./plugins/file-save",
     "@regret/stream-http": "file:./plugins/stream-http",
     "dexie": "^4.4.6",
     "react": "^19.3.0",

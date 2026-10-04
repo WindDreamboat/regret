@@ -1,3 +1,4 @@
+import { saveTextFile, type SaveResult } from '../../adapters/files/fileSave'
 import type { AppServices } from '../../composition/root'
 import { buildMemoryExport } from '../../core/memory/export'
 import { DEFAULT_SESSION_ID } from '../../core/memory/types'
@@ -8,12 +9,13 @@ import { clearStrategy, loadStrategy } from './strategyStorage'
 /**
  * 数据管理：导出备份与两种清除。
  *
- * 这些动作都要碰 `Blob` / `URL` / `location` 等浏览器 API，因此留在 features
- * 层；序列化本身是纯逻辑，已放在 `core/memory/export.ts`。
+ * 清除要碰 `location`、导出要碰设备文件系统，因此留在 features 层；序列化本身是
+ * 纯逻辑（`core/memory/export.ts`），落盘交给 `adapters/files/fileSave.ts`——打包版
+ * 弹系统「另存为」，Web 走浏览器下载。
  */
 
-/** 把当前会话的对话、记忆与人设打包成 JSON 并触发下载。 */
-export async function downloadMemoryExport(services: AppServices): Promise<void> {
+/** 把当前会话的对话、记忆与人设打包，交给设备落盘并回报结果。 */
+export async function exportMemoryBackup(services: AppServices): Promise<SaveResult> {
   const store = services.memoryStore
   const [messages, facts, relation, summaries] = await Promise.all([
     store.listMessages(DEFAULT_SESSION_ID),
@@ -35,13 +37,20 @@ export async function downloadMemoryExport(services: AppServices): Promise<void>
     Date.now(),
   )
 
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `regret-backup-${formatDate(bundle.exportedAt)}.json`
-  link.click()
-  URL.revokeObjectURL(url)
+  return saveTextFile({
+    fileName: backupFileName(bundle.exportedAt),
+    text: JSON.stringify(bundle, null, 2),
+  })
+}
+
+/**
+ * 备份文件名：`regret-backup-<本地日期>.json`。
+ *
+ * 日期取**本地日历**而不是 `toISOString()`——后者是 UTC，东八区凌晨导出会写成前一天：
+ * 真机实测本地 10-05 00:50 导出得到 `regret-backup-2026-10-04.json`，用户按日期找备份时对不上号。
+ */
+export function backupFileName(exportedAt: number): string {
+  return `regret-backup-${formatLocalDate(exportedAt)}.json`
 }
 
 /**
@@ -64,6 +73,10 @@ export async function resetToFactory(services: AppServices): Promise<void> {
   location.reload()
 }
 
-function formatDate(ts: number): string {
-  return new Date(ts).toISOString().slice(0, 10)
+/** 本地日历日期（月、日补零）；`getMonth()` 从 0 起算，故 +1 */
+function formatLocalDate(ts: number): string {
+  const date = new Date(ts)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
 }

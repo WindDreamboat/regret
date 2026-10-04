@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { SaveResult } from '../../adapters/files/fileSave'
 import type { AppServices } from '../../composition/root'
 import {
   DEFAULT_DIRECT_MODEL,
@@ -9,7 +10,7 @@ import {
 import type { Persona } from '../../core/persona/types'
 import { CHALLENGE_MIN, DEFAULT_STRATEGY, type StrategyProfile } from '../../core/strategy/types'
 import { PersonaPanel } from '../persona/PersonaPanel'
-import { clearConversation, downloadMemoryExport, resetToFactory } from './dataManagement'
+import { clearConversation, exportMemoryBackup, resetToFactory } from './dataManagement'
 
 export interface SettingsPageProps {
   services: AppServices
@@ -79,6 +80,19 @@ function endpointHint(draft: string): string | undefined {
   return `实际请求：${resolved}`
 }
 
+/**
+ * 把导出结果说成人话。
+ *
+ * 浏览器那条路的落点由浏览器决定（一般在「下载」里），所以要点明去哪找；系统「另存为」
+ * 的位置是用户刚刚亲手选的，回显文件名就够。取消也照样说一声——真机上"保存好了"和
+ * "点了没反应"本来就没法用眼睛区分。
+ */
+function describeExport(result: SaveResult): string {
+  if (result.kind === 'cancelled') return '已取消导出'
+  if (result.via === 'browser') return `已导出 ${result.fileName}，可在「下载」里找到`
+  return `已保存 ${result.fileName}`
+}
+
 /** 三档人话提示；界面不暴露参数名与数值 */
 function bandOf(value: number, base: number): string {
   if (value < base) return '偏低'
@@ -99,6 +113,8 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [category, setCategory] = useState<Category>('persona')
   const [dataError, setDataError] = useState<string | null>(null)
+  // 导出成功/取消都要说一声：真机上"点了没反应"和"保存好了"肉眼没有区别
+  const [dataNotice, setDataNotice] = useState<string | null>(null)
   // 直连与走代理的字段含义不同（接口地址 vs 代理地址、模型名必填 vs 可留空），文案随之切换
   const direct = chatConfig.provider === 'direct'
 
@@ -126,10 +142,16 @@ export function SettingsPage({
     onChangeChatConfig({ ...chatConfig, [key]: value })
   }
 
-  const runDataAction = async (action: () => Promise<void>) => {
+  /**
+   * 数据操作统一入口：动作返回一句提示就展示出来，返回空则什么都不说
+   * （两个清除动作会整页重载，没有可展示的时机）。
+   */
+  const runDataAction = async (action: () => Promise<string | void>) => {
     setDataError(null)
+    setDataNotice(null)
     try {
-      await action()
+      const notice = await action()
+      if (typeof notice === 'string') setDataNotice(notice)
     } catch (cause) {
       setDataError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -305,11 +327,21 @@ export function SettingsPage({
 
             <button
               type="button"
-              onClick={() => void runDataAction(() => downloadMemoryExport(services))}
+              onClick={() =>
+                void runDataAction(async () => describeExport(await exportMemoryBackup(services)))
+              }
               className="w-full rounded-full border border-line-strong py-2.5 text-sm text-text transition-colors duration-150 hover:border-accent-line hover:bg-accent-soft"
             >
               导出记忆备份
             </button>
+
+            {/* 结果提示刻意保持中性：强调色底在浅色主题下与下面的危险操作红字难以区分，
+                「已保存」看起来像报警（真机截图确认） */}
+            {dataNotice !== null && (
+              <p className="rounded-2xl border border-line bg-surface px-4 py-3 text-xs leading-relaxed text-muted">
+                {dataNotice}
+              </p>
+            )}
 
             {/* 危险操作排成列表行：与上面的主操作按钮拉开层级，也避免"处处圆角卡片" */}
             <div className="border-t border-line">
