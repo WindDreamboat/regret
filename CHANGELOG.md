@@ -12,6 +12,37 @@
 
 ### 新增
 
+- **跨域不再是必须部署代理的理由**：厂商接口不回 CORS 头时，App 改由**系统（原生）网络栈**发请求，直连模式对任意网关都成立。
+  - 背景（实测）：打包版 WebView 来源是 `https://localhost`，对 `https://gateway.example.com/api/v1/chat/completions` 的预检返回 `405`、响应里没有任何 `Access-Control-Allow-*`，浏览器 fetch 必然失败——此前这类网关只能自建代理。
+  - 新增 `src/adapters/llm/nativeFetch.ts`：`createNativeFetch()` 用 `@capacitor/core` 自带的 `CapacitorHttp` 把整包响应还原成 `Response`，因此适配器的 SSE 解析逻辑完全复用。**刻意不开启 `plugins.CapacitorHttp.enabled`**——那会把全局 fetch 换成原生实现，连能流式的厂商也一起牺牲；这里只在需要时显式调用插件。Web 上返回 `undefined`。
+  - `DeepSeekAdapter`：新增可选 `nativeFetch`。发请求**先走浏览器 fetch（唯一能拿到逐字流的通道），被跨域拦下或网络出错时回退原生**；相对地址（代理模式的默认 `/api/chat`）不参与回退——原生请求需要绝对地址。回退时请求头与请求体完全一致。
+  - `composition/root.ts`：组装根构造并注入原生传输。
+  - 设置页直连模式提示改为「厂商不支持跨域时，App 会自动改用系统网络请求」。
+  - **代价**：原生 HTTP 整包返回，回退后没有逐字流（该网关本就一次性返回，实测整包往返 4.9 s / 6.8 s，无差别）。**代理的价值随之只剩「Key 不落设备 + 服务端限流」**。
+  - 测试：单测 184 → 194（`nativeFetch` 5 例：平台判定、参数透传与超时、整包还原、JSON 错误体、原生异常向上抛；`DeepSeekAdapter` 回退 5 例：跨域失败后回退并正常出流、回退时头与体一致、浏览器正常时不回退、相对地址不回退、原生也失败时的错误文案）。
+  - **真机验证**：清空对话后把厂商地址与原有密钥写进设置，开场白与后续对话都是真实模型在人设内生成（「（翻着书页头也不抬）啊，你来了…」）；CDP 抓到的原生响应带 `X-Android-Response-Source: NETWORK 200`，确认请求发自系统网络栈而非 WebView。
+  - **回滚条件**：`git revert` 该提交。回滚后不支持 CORS 的厂商只能靠自建代理，直连模式仅对允许跨域的接口可用；对话数据与连接配置不受影响。
+
+- 新增**直连模式**（`provider: 'direct'`）：App 直接调厂商接口，**不必再部署代理**。在「设置 → 连接」选「真实模型（直连厂商）」，填厂商接口地址与 API Key 即可；与既有的走代理模式并存，可随时切回。
+  - `core/llm/config.ts`：`ChatProviderKind` 增加 `direct`（枚举外仍退 `mock`），新增 `DEFAULT_DIRECT_MODEL = 'deepseek-chat'`——直连时模型名由客户端写进请求体，留空会让厂商按自己的默认模型处理、结果不可预期。
+  - `adapters/llm/DeepSeekAdapter.ts`：新增 `mode: 'proxy' | 'direct'`（默认 `proxy`，代理路径逐字节不变）。直连时**模型名与 `stream: true` 由客户端写进请求体**、只发 `Authorization`（`X-Chat-*` 是自建代理的约定，发给厂商只会多触发一次预检）；端点留空不再回落到相对路径 `/api/chat`，而是给出「请到设置页填接口地址」的可读错误；非 2xx 文案按模式区分（`接口返回 401` / `代理返回 401`）。
+  - `composition/root.ts`：`createServices` 内的选路抽成 `createChatProvider`，`deepseek` → proxy、`direct` → direct，`mock` 仍走 `MockChatProvider`。
+  - `features/settings/chatConfigStorage.ts`：`VITE_CHAT_PROVIDER` 直接交给 `normalizeChatConfig` 兜底（原先是 `=== 'deepseek'` 的二元判断，会吞掉 `direct`），`.env` 现在可以写 `direct`。
+  - `SettingsPage.tsx`：「对话服务」由二选一变三选一；选直连时字段文案切换为「接口地址 / API Key（必填）/ 模型名（留空用 `deepseek-chat`）」，并**隐藏「网关地址」**（那是代理侧概念，直连填了也没用）。
+  - 测试：单测 184（新增 `DeepSeekAdapter` 直连 6 例——请求体带模型与流式、只带 Authorization、默认模型、缺地址时不发请求、错误文案、SSE 解析；`config` 枚举 1 例）；e2e 40（新增「切到直连后直接请求厂商接口，配置刷新后保留」，用 `page.route` 拦厂商域名并断言实际请求，不依赖外网）。
+  - **前提：厂商接口必须允许跨源访问**。实测 `https://api.deepseek.com/v1/chat/completions` 的 `OPTIONS` 返回 `access-control-allow-origin: https://localhost`，并**逐条回显**请求头（含我们约定的 `X-Chat-*`）→ WebView 可直连；反之 `https://gateway.example.com/api`（当前 `.env` 默认网关）的 `OPTIONS` 返回 `405` 且响应里没有任何 `Access-Control-Allow-*` → 走这条网关只能靠代理。
+  - **代价**：直连模式下 Key 必须在设备上（设置页 localStorage 明文）且随请求直发厂商，没有代理层代持或脱敏；也放弃了代理的「来源白名单 + 限流」。
+  - **回滚条件**：`git revert` 该功能提交。回滚后 `provider` 枚举不再认 `direct`，已把设置改成直连的设备会**静默退回演示模式**（`normalizeChatConfig` 把未知值判为 `mock`，表现为「回声机」），用户需重新选「真实模型」并改回代理地址；对话、记忆与人设数据不受影响。
+
+- 「暖夜玫瑰」视觉改版：界面由中性灰换成带玫瑰色相的自有令牌，并补齐打包版需要的安全区与形态细节。
+  - `src/index.css`：新增 `@theme` 令牌——`ink-*` 中性色阶每档都带一丝玫瑰色相（chroma ≈ 0.010–0.016，与主色同温，暗色下不发死）、`accent-*` 主色阶；新增 `.app-canvas`（暖玫瑰光晕自顶部泻下，纯色渐变、不含透明度，WebView 上渲染稳）、`.bubble` / `.bubble-from-her` / `.bubble-from-you`（说话的一侧收一个角，用长写属性单独覆盖，避开与 Tailwind 圆角简写的层序不确定）、`.safe-top` / `.safe-bottom`（`max(0.75rem, env(safe-area-inset-*))`，桌面浏览器下 `env()` 为 0 自然退化）、`rise-in` 入场动画（仅在 `prefers-reduced-motion: no-preference` 下启用，且只动位移与不透明度——**绝不碰颜色**，e2e 会读气泡的 computed 颜色）。
+  - `src/app/App.tsx`：根容器改用 `app-canvas` + `text-ink-100`。
+  - `src/features/chat/ChatPage.tsx`：页头与底部输入栏接入安全区；页头按钮抽成 `HeaderButton`；输入框与发送键改胶囊形态（发送键 `accent-500` 实心 + `active:scale-95`）；错误提示由 `red-*` 改为 `accent-*`；关系条与时间戳随令牌换色。
+  - `src/features/persona/PersonaPage.tsx` 与 `src/features/settings/SettingsPage.tsx`：卡片、控件外皮与文案层级统一到新令牌。
+  - 测试：单测与 e2e 全绿（渲染断言只涉及文案与行为，不依赖具体色值）；真机确认安全区在非边到边 WebView 下退化正常、深色状态栏文字可读。
+  - **说明**：`SettingsPage.tsx` 的视觉改动与「连接」区块的功能改动在同一个文件里，无法按文件拆分，因此该文件的视觉部分随 `feat(llm)` 提交进入。
+  - **回滚条件**：`git revert` 该提交；回滚后界面回到中性灰（`neutral-*`）配色，`index.css` 的 `@theme` 令牌与 `.app-canvas` 等类名一并移除，功能与数据不受影响。
+
 - 连接配置改为**页面可配置**（设置页新增「连接」区块）：对话服务（演示模式 / 真实模型）、代理地址、API Key、网关地址、模型名均可即时填写并保存在本机，**打包出 APK 后不必为改这些值重新构建**。
   - `core/llm/config.ts`：新增 `ChatConfig` / `DEFAULT_CHAT_CONFIG` / `normalizeChatConfig`（localStorage 属不可信边界：非对象退默认、`provider` 非枚举退 `mock`、文本去空白并截断、地址只接受 `http(s)://` 或 `/` 开头）与 `CHAT_CONFIG_HEADERS`（前后端共用的头名常量，避免字面量漂移）。
   - `features/settings/chatConfigStorage.ts`：localStorage key `regret.chatConfig`；**无本地记录时回退构建期 `.env`**，因此 Web 与开发环境行为不变。
@@ -143,10 +174,29 @@
 
 ### 修复
 
+- **设置页的连接字段逐字输入时会被吞掉前缀**（真机实测暴露，`features/settings/SettingsPage.tsx`）：受控输入框直接把 `normalizeChatConfig` 的结果回填，而地址字段只接受 `http(s)://` 或 `/` 开头，于是手敲 `https://api.deepseek.com/v1/chat/completions` 时，前半截还不合法的前缀被当场抹掉——真机表现为输入框里只剩 `//api.deepseek.com/v1/chat/completions`，即**手输 URL 根本输不进去**（e2e 用 `fill()` 一次性赋值，所以此前没暴露）。
+  - 现改为：输入框显示本地草稿，规范化后的值照旧入库；草稿没被采纳时（如 `ftp://…`）在该字段下方直接说明原因，不再让用户对着「填了却没生效」的哑谜。
+  - 测试：e2e 新增「地址字段填了非法值时给出提示」，并把「切到直连」用例的接口地址改为 `pressSequentially` **逐字输入**（用 `fill()` 的话这个 bug 会溜过去）；e2e 40 → 42。
+  - **回滚条件**：`git revert` 该提交。回滚后手输完整 URL 会重新丢前缀（可改用粘贴），非法值也会重新静默变空。
+
+- **开发期代理与线上代理行为不一致的两处缺陷**（真机联调时实测暴露，`server/devApiPlugin.ts`）：
+  - **`.env` 从未加载**：Vite 只把 `.env` 给 `import.meta.env`，**不会注入 `process.env`**，而 `createChatHandler()` 默认只读 `process.env` → `npm run dev` 下选真实模型必然返回 500「代理未配置 DEEPSEEK_API_KEY」（已用 curl 复现）。现于 `configResolved` 用 `loadEnv(config.mode, config.root, '')` 加载后注入 handler；**前缀传空串是有意的**——代理侧变量刻意不带 `VITE_` 前缀，沿用默认的 `VITE_` 前缀恰好会漏掉 `DEEPSEEK_API_KEY`。
+  - **客户端请求头被整体丢弃**：`forward` 原先只透传 `Content-Type`，设置页填的 `Authorization` / `X-Chat-Base-Url` / `X-Chat-Model` 在开发环境静默失效（与「页面填了就以页面为准」相矛盾，且链路与经 serverless 部署时不同）。现改为逐条转发并剔除逐跳头（`host` / `connection` / `content-length` / `transfer-encoding`）。
+  - 测试：新增 `server/devApiPlugin.test.ts` 6 例（头转发、逐跳头剔除、重复头合并、`.env` 空前缀读取、多个代理变量一并读出、目录内没有 `.env` 时不报错），单测 171 → 177。
+  - **回滚条件**：`git revert` 该提交。回滚后开发环境退回「必须把 Key 导出成 shell 环境变量，否则 /api/chat 一律 500」，且设置页的连接配置在 `npm run dev` 下不生效；打包版与经 serverless 部署的代理路径不受影响。
+
 - `core/memory/state.ts`：新增 `stripStateBlock`，**未闭合的 `<state>` 尾巴也一并剥离**。原先只处理完整状态块，流式过程中标签尚未收尾，用户会短暂看到 `<state>{"mood"...` 这样的原文（由 e2e 暴露）。`parseStateBlock` 改用它取展示文本；`state.test.ts` 中「只有开标签没有闭标签时不剥离」的用例断言的是旧行为，已改为正确期望。**回滚条件**：`git revert` 该提交；回滚后流式过程中会重新露出半截状态块。
 - `features/chat/ChatPage.tsx` 的 `submit`：生成中按回车会先清空输入框、再被 `send` 丢弃，等于用户白打字；现改为生成中直接返回，保留已输入内容。**回滚条件**：`git revert` 该提交；回滚后输入内容会在生成中被无谓清空。
 
 ### 变更
+
+- `docs/Android打包指南.md` 同步真机实测结论：第三节改写为「直连厂商 / 走自建代理」两种用法的对照与各自前提（含两组厂商 CORS 实测：`api.deepseek.com` 放行、`gateway.example.com` 返回 405 且无 `Access-Control-Allow-*`）；第二节补两条本机已踩过的命令坑（PATH 里的老 `adb` 会杀掉 adb server、编辑器注入的 `NODE_OPTIONS` 删除垫片会让 `cap sync` 失败）；第四节的产物体积与第五节的验收清单更新为实测值（APK 4.17 MB、冷启动数据保留、键盘不遮挡、深色状态栏可读均已验证）。
+  - **第五节「与代理连通」已补齐验证**：把同一份 `server/handler.ts` 起成裸 http server（等价于线上 serverless，而不是 Vite 插件——后者的 CORS 中间件会抢答 `OPTIONS`，开发环境永远测不到线上预检路径）＋ `adb reverse`，打包版实测 `OPTIONS 204`（`Allow-Origin` 与 `Allow-Methods: POST, OPTIONS` 来自我们的 handler）后 `POST 200` 两次（主对话 1478ms + 记忆抽取 2036ms）。为跑通该链路改了**生成工程**（不入库）：清单加 `android:usesCleartextTraffic="true"`、`assets/capacitor.config.json` 加 `cleartext/allowMixedContent/webContentsDebuggingEnabled`——实测仅靠 `server.cleartext` 无效，WebView 直接报 `net::ERR_CLEARTEXT_NOT_PERMITTED`。**仍未验证**：真正公网 https 代理（TLS 与跨网时延）。
+  - 第六节已知局限新增三条：打包版只能走 https（明文策略）、真机排查用 `webContentsDebuggingEnabled` + CDP 读 `Network.loadingFailed.blockedReason`、**演示模式的回声历史会污染真实模型**（模型照着 Mock 的 `我听到你说：…` 格式回话，实测出现过）。
+  - **回滚条件**：`git checkout HEAD~1 -- docs/Android打包指南.md`，不影响代码与运行。
+
+- `docs/虚拟伴侣应用_需求简报与开发里程碑.md`：6.3 节补「代理降为可选」的决策变更——原先「必须有代理」的硬理由只有跨源，现已由 App 侧原生回退解决；待决项「代理部署方式」注明仅在选择走代理时才需要。
+  - **回滚条件**：`git checkout HEAD~1 -- docs/虚拟伴侣应用_需求简报与开发里程碑.md`，纯文档。
 
 - 迭代 4 批次 3：主链路的体积与渲染有界化（三处实测的无界增长，非猜测性优化）。
   - `features/chat/useChat.ts`：抽取游标 `extractedCountRef` 不持久化、刷新后归零，此前一次触发会把**整段历史**打包发给模型；现单次最多送入 40 条（`EXTRACTION_WINDOW_MESSAGES`），更早原文此前已抽取、事实已在库中。
