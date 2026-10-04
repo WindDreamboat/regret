@@ -82,7 +82,9 @@ test('首屏渲染应用外壳', async ({ page }) => {
   await expect(page.locator('header h1')).toHaveText('小满')
   await expect(page.locator(BUBBLES)).toHaveCount(1)
   await expect(page.locator(BUBBLES).first()).toHaveText(WELCOME)
-  await expect(page.getByRole('button', { name: '人设' })).toBeVisible()
+  // 配置入口收成一个：人设已并入设置，对话页头部不再有「人设」按钮
+  await expect(page.getByRole('button', { name: '设置' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '人设' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '发送' })).toBeVisible()
 
   expect(consoleErrors).toEqual([])
@@ -146,8 +148,21 @@ test('消息按发送方分列且配色不同', async ({ page }) => {
 
   const user = styles[1]
   const assistant = styles[2]
+  // 区分靠「对齐 + 底色」：两边的字色刻意一致（同色字、不同底），加字色差异只是噪音
   expect(user?.background).not.toBe(assistant?.background)
-  expect(user?.color).not.toBe(assistant?.color)
+  expect(user?.color).toBe(assistant?.color)
+})
+
+test('新消息自动跟随到底部，不需要手动滚动', async ({ page }) => {
+  await gotoApp(page)
+
+  // 连发几条把列表撑出屏幕；跟随失效的话最后一条会在视野外
+  for (const text of ['一', '二', '三', '四', '五']) {
+    await sendMessage(page, text)
+  }
+
+  await expect(page.locator(BUBBLES).last()).toHaveText(replyTo('五'))
+  await expect(page.locator(BUBBLES).last()).toBeInViewport()
 })
 
 test('刷新后消息从 IndexedDB 恢复', async ({ page }) => {
@@ -189,26 +204,26 @@ test('关系状态条展示阶段、亲密度与情绪，并随回复更新', as
   await expect(bar).toContainText('温和')
 })
 
-test('人设保存后标题变化且刷新后保留', async ({ page }) => {
+test('人设改动即时生效，刷新后保留', async ({ page }) => {
   await gotoApp(page)
   await expect(page.locator('header h1')).toHaveText('小满')
 
-  await page.getByRole('button', { name: '人设' }).click()
-  await expect(page.getByText('人设配置')).toBeVisible()
-  for (const label of ['伴侣的名字', '她对你的称呼', '性格', '背景故事']) {
+  await openSettings(page, '人设')
+  for (const label of ['她的名字', '她对你的称呼', '性格', '背景故事']) {
     await expect(page.getByText(label)).toBeVisible()
   }
 
+  // 没有保存按钮：改一个字符就已生效并落盘
   await page.getByPlaceholder('例如：小满').fill('阿念')
   await page.getByPlaceholder('例如：温和，爱吐槽，偶尔嘴硬').fill('温柔，话少')
-  await page.getByRole('button', { name: '保存' }).click()
 
+  await backToChat(page)
   await expect(page.locator('header h1')).toHaveText('阿念')
 
   await page.reload()
   await expect(page.locator('header h1')).toHaveText('阿念')
 
-  await page.getByRole('button', { name: '人设' }).click()
+  await openSettings(page, '人设')
   await expect(page.getByPlaceholder('例如：小满')).toHaveValue('阿念')
   await expect(page.getByPlaceholder('例如：温和，爱吐槽，偶尔嘴硬')).toHaveValue('温柔，话少')
 })
@@ -284,7 +299,18 @@ test('追问后下一条回复延续该话题，且重新打开不重复追问',
   await expect(page.locator(BUBBLES).last()).toHaveText(`${CONTINUATION_PREFIX}${replyTo('刚忙完，还行')}`)
 })
 
-const openSettings = (page: Page) => page.getByRole('button', { name: '设置' }).click()
+/**
+ * 打开设置并切到指定分类。
+ *
+ * 设置按「要改的是什么」分成四类，一次只呈现一类；不传分类时停在默认的「人设」。
+ */
+const openSettings = async (
+  page: Page,
+  category?: '人设' | '说话方式' | '连接' | '数据',
+): Promise<void> => {
+  await page.getByRole('button', { name: '设置' }).click()
+  if (category !== undefined) await page.getByRole('tab', { name: category }).click()
+}
 const backToChat = (page: Page) => page.getByRole('button', { name: '返回' }).click()
 
 test('调整旋钮后回复带上风格设定，刷新后设置保留', async ({ page }) => {
@@ -294,7 +320,7 @@ test('调整旋钮后回复带上风格设定，刷新后设置保留', async ({
   await sendMessage(page, '你好')
   await expect(page.locator(BUBBLES).last()).toHaveText(replyTo('你好'))
 
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   const humor = page.getByRole('slider', { name: '幽默感' })
   await expect(humor).toBeVisible()
   await humor.fill('0.8')
@@ -305,13 +331,13 @@ test('调整旋钮后回复带上风格设定，刷新后设置保留', async ({
 
   // 即时生效并持久化
   await page.reload()
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   await expect(page.getByRole('slider', { name: '幽默感' })).toHaveValue('0.8')
 })
 
 test('不同意见滑块下限为 0.15', async ({ page }) => {
   await gotoApp(page)
-  await openSettings(page)
+  await openSettings(page, '说话方式')
 
   const challenge = page.getByRole('slider', { name: '不同意见' })
   await expect(challenge).toHaveAttribute('min', '0.15')
@@ -322,13 +348,13 @@ test('不同意见滑块下限为 0.15', async ({ page }) => {
 test('恢复默认后回复不再带风格设定', async ({ page }) => {
   await gotoApp(page)
 
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
   await backToChat(page)
   await sendRaw(page, '在吗')
   await expect(page.locator(BUBBLES).last()).toHaveText(`${STRATEGY_PREFIX}${replyTo('在吗')}`)
 
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   await page.getByRole('button', { name: '恢复默认' }).click()
   await backToChat(page)
 
@@ -337,7 +363,7 @@ test('恢复默认后回复不再带风格设定', async ({ page }) => {
 
 test('界面不暴露参数名或 JSON 字面量', async ({ page }) => {
   await gotoApp(page)
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
 
   const text = await page.locator('body').innerText()
@@ -350,7 +376,7 @@ test('界面不暴露参数名或 JSON 字面量', async ({ page }) => {
 test('导出记忆备份会触发下载', async ({ page }) => {
   await gotoApp(page)
   await sendMessage(page, '你好')
-  await openSettings(page)
+  await openSettings(page, '数据')
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: '导出记忆备份' }).click()
@@ -363,16 +389,15 @@ test('清除对话与记忆后回到开场，人设与说话方式保留', async
   await gotoApp(page)
 
   // 先留下数据：改人设、调旋钮、发一条消息
-  await page.getByRole('button', { name: '人设' }).click()
+  await openSettings(page, '人设')
   await page.getByPlaceholder('例如：小满').fill('阿念')
-  await page.getByRole('button', { name: '保存' }).click()
-  await openSettings(page)
+  await page.getByRole('tab', { name: '说话方式' }).click()
   await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
   await backToChat(page)
   await sendRaw(page, '你好')
   await expect(page.getByTestId('relation-bar')).toContainText('亲密度 1')
 
-  await openSettings(page)
+  await openSettings(page, '数据')
   await page.getByRole('button', { name: '清除对话与记忆' }).click()
   await page.getByRole('button', { name: '确认清除' }).click()
 
@@ -384,26 +409,27 @@ test('清除对话与记忆后回到开场，人设与说话方式保留', async
 
   // 人设与旋钮不受影响
   await expect(page.locator('header h1')).toHaveText('阿念')
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   await expect(page.getByRole('slider', { name: '幽默感' })).toHaveValue('0.8')
 })
 
 test('恢复出厂设置会清掉人设与说话方式', async ({ page }) => {
   await gotoApp(page)
 
-  await page.getByRole('button', { name: '人设' }).click()
+  await openSettings(page, '人设')
   await page.getByPlaceholder('例如：小满').fill('阿念')
-  await page.getByRole('button', { name: '保存' }).click()
+  await backToChat(page)
   await expect(page.locator('header h1')).toHaveText('阿念')
 
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
+  await page.getByRole('tab', { name: '数据' }).click()
   await page.getByRole('button', { name: '恢复出厂设置' }).click()
   await page.getByRole('button', { name: '确认恢复' }).click()
 
   // 回到默认人设与默认旋钮
   await expect(page.locator('header h1')).toHaveText('小满')
-  await openSettings(page)
+  await openSettings(page, '说话方式')
   await expect(page.getByRole('slider', { name: '幽默感' })).toHaveValue('0.5')
 })
 
@@ -411,7 +437,7 @@ test('危险操作可就地取消，不会清除数据', async ({ page }) => {
   await gotoApp(page)
   await sendMessage(page, '你好')
 
-  await openSettings(page)
+  await openSettings(page, '数据')
   await page.getByRole('button', { name: '清除对话与记忆' }).click()
   await page.getByRole('button', { name: '取消' }).click()
   await backToChat(page)
@@ -422,7 +448,7 @@ test('危险操作可就地取消，不会清除数据', async ({ page }) => {
 
 test('设置页填写的连接配置刷新后保留', async ({ page }) => {
   await gotoApp(page)
-  await openSettings(page)
+  await openSettings(page, '连接')
 
   // provider 保持演示模式，其余字段只做持久化验证，不发起真实请求
   await page.getByLabel('代理地址').fill('/api/chat')
@@ -431,7 +457,7 @@ test('设置页填写的连接配置刷新后保留', async ({ page }) => {
   await page.getByLabel('模型名').fill('flash')
 
   await page.reload()
-  await openSettings(page)
+  await openSettings(page, '连接')
 
   await expect(page.getByLabel('代理地址')).toHaveValue('/api/chat')
   await expect(page.getByLabel('API Key')).toHaveValue('sk-local')
@@ -477,7 +503,7 @@ test('切到直连后直接请求厂商接口，配置刷新后保留', async ({
   })
 
   await gotoApp(page)
-  await openSettings(page)
+  await openSettings(page, '连接')
 
   // 演示模式与走代理都展示代理侧字段
   await expect(page.getByLabel('代理地址')).toBeVisible()
@@ -509,7 +535,7 @@ test('切到直连后直接请求厂商接口，配置刷新后保留', async ({
   expect(posts[0]?.chatHeaders).toEqual([])
 
   await page.reload()
-  await openSettings(page)
+  await openSettings(page, '连接')
 
   await expect(page.getByLabel('对话服务')).toHaveValue('direct')
   await expect(page.getByLabel('接口地址')).toHaveValue(
@@ -521,7 +547,7 @@ test('切到直连后直接请求厂商接口，配置刷新后保留', async ({
 
 test('地址字段填了非法值时给出提示', async ({ page }) => {
   await gotoApp(page)
-  await openSettings(page)
+  await openSettings(page, '连接')
 
   const warning = page.getByText('这个地址没生效：只能以 http(s):// 或 / 开头')
 
@@ -532,19 +558,36 @@ test('地址字段填了非法值时给出提示', async ({ page }) => {
   await expect(warning).toHaveCount(0)
 })
 
+test('直连只填到网关时，提示实际请求地址', async ({ page }) => {
+  await gotoApp(page)
+  await openSettings(page, '连接')
+  await page.getByLabel('对话服务').selectOption('direct')
+
+  // 真机上有人这么填过：厂商把它 307 跳到别处，界面只回一句状态码，无从改起
+  await page.getByLabel('接口地址').fill('https://gateway.example.com/api/v1')
+  await expect(
+    page.getByText('实际请求：https://gateway.example.com/api/v1/chat/completions'),
+  ).toBeVisible()
+
+  // 已经是完整地址就不再重复提示
+  await page.getByLabel('接口地址').fill('https://api.deepseek.com/v1/chat/completions')
+  await expect(page.getByText(/^实际请求：/)).toHaveCount(0)
+})
+
 test('恢复出厂设置会清掉连接配置', async ({ page }) => {
   await gotoApp(page)
-  await openSettings(page)
+  await openSettings(page, '连接')
 
   await page.getByLabel('对话服务').selectOption('deepseek')
   await page.getByLabel('代理地址').fill('/api/chat')
   await page.getByLabel('模型名').fill('flash')
 
+  await page.getByRole('tab', { name: '数据' }).click()
   await page.getByRole('button', { name: '恢复出厂设置' }).click()
   await page.getByRole('button', { name: '确认恢复' }).click()
 
   await expect(page.locator('header h1')).toHaveText('小满')
-  await openSettings(page)
+  await openSettings(page, '连接')
   await expect(page.getByLabel('对话服务')).toHaveValue('mock')
   await expect(page.getByLabel('代理地址')).toHaveValue('')
   await expect(page.getByLabel('模型名')).toHaveValue('')
