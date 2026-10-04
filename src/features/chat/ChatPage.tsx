@@ -1,15 +1,16 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState } from 'react'
 import type { AppServices } from '../../composition/root'
 import type { Speaker } from '../../core/llm/protocol'
 import type { Persona } from '../../core/persona/types'
 import type { StrategyProfile } from '../../core/strategy/types'
 import { useChat } from './useChat'
+import { usePacedReveal } from './usePacedReveal'
+import { useStickToBottom } from './useStickToBottom'
 
 export interface ChatPageProps {
   services: AppServices
   persona: Persona
   strategy: StrategyProfile
-  onOpenPersona: () => void
   onOpenSettings: () => void
 }
 
@@ -21,9 +22,14 @@ export interface ChatPageProps {
  */
 const VISIBLE_MESSAGE_LIMIT = 60
 
-export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSettings }: ChatPageProps) {
+export function ChatPage({ services, persona, strategy, onOpenSettings }: ChatPageProps) {
   const { messages, relation, draft, isGenerating, error, send } = useChat(services, persona, strategy)
   const [input, setInput] = useState('')
+  const scrollRef = useRef<HTMLElement | null>(null)
+
+  // 上游整包返回时把节奏补回来；逐字流时只是跟着走
+  const visibleDraft = usePacedReveal(draft, isGenerating)
+  useStickToBottom(scrollRef, `${messages.length}:${visibleDraft.length}:${error ?? ''}`)
 
   const submit = () => {
     // 正在生成时不要清空输入框：send 会直接返回，否则用户刚打的字会被无谓清掉
@@ -35,48 +41,81 @@ export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSet
 
   const hiddenCount = Math.max(0, messages.length - VISIBLE_MESSAGE_LIMIT)
   const visibleMessages = hiddenCount > 0 ? messages.slice(-VISIBLE_MESSAGE_LIMIT) : messages
+  const name = persona.name.trim() === '' ? '虚拟伴侣' : persona.name
 
   return (
     <>
-      <header className="safe-top flex items-center justify-between gap-3 border-b border-ink-800 px-4 pb-3">
-        <h1 className="flex items-center gap-2 text-base font-medium tracking-wide">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent-400" />
-          {persona.name.trim() === '' ? '虚拟伴侣' : persona.name}
-        </h1>
-        <div className="flex items-center gap-1">
-          <HeaderButton onClick={onOpenPersona}>人设</HeaderButton>
-          <HeaderButton onClick={onOpenSettings}>设置</HeaderButton>
+      {/* 头部不做 sticky：让名字与关系随对话滚走，屏幕留给内容 */}
+      <header className="safe-top px-5 pb-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 truncate text-[1.0625rem] font-medium tracking-[0.01em] text-text">
+              <span aria-hidden className="presence" />
+              {name}
+            </h1>
+            {relation !== null && (
+              <p
+                data-testid="relation-bar"
+                className="mt-1.5 text-xs leading-5 text-faint"
+              >
+                <span className="text-accent-text">{relation.stage}</span>
+                <Separator />
+                亲密度 {relation.intimacy}
+                {relation.mood.trim() !== '' && (
+                  <>
+                    <Separator />
+                    {relation.mood}
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="-mr-2 shrink-0 rounded-full px-3 py-2 text-sm text-muted transition-colors duration-150 hover:text-accent-text active:bg-surface"
+          >
+            设置
+          </button>
         </div>
       </header>
 
-      {relation !== null && (
-        <div
-          data-testid="relation-bar"
-          className="flex items-center gap-1.5 border-b border-ink-800 px-4 py-2"
-        >
-          <Chip tone="accent">{relation.stage}</Chip>
-          <Chip>亲密度 {relation.intimacy}</Chip>
-          {relation.mood.trim() !== '' && <Chip>{relation.mood}</Chip>}
-        </div>
-      )}
-
-      <main className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+      {/* min-h-0：flex 子项默认 min-height:auto，不写它就算有 overflow 也不会收缩 */}
+      <main
+        ref={scrollRef}
+        className="scroll-slim flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-4"
+      >
         {hiddenCount > 0 && (
-          <p className="pb-1 text-center text-xs text-ink-500">
+          <p className="pb-3 text-center text-xs text-faint">
             更早的 {hiddenCount} 条仍保存在本地
           </p>
         )}
 
-        {visibleMessages.map((message, index) => (
-          <Bubble key={`${message.ts}-${index}`} role={message.role} content={message.content} />
-        ))}
+        {visibleMessages.map((message, index) => {
+          const previous = visibleMessages[index - 1]
+          return (
+            <Bubble
+              key={`${message.ts}-${index}`}
+              role={message.role}
+              content={message.content}
+              first={previous === undefined || previous.role !== message.role}
+            />
+          )
+        })}
 
         {isGenerating && (
-          <Bubble role="assistant" content={draft} pending testId="pending-bubble" />
+          <Bubble
+            role="assistant"
+            content={visibleDraft}
+            first={visibleMessages.at(-1)?.role !== 'assistant'}
+            pending
+            testId="pending-bubble"
+          />
         )}
 
         {error !== null && (
-          <p className="rounded-xl border border-accent-900 bg-accent-950 px-3 py-2 text-sm text-accent-200">
+          <p className="mt-3 rounded-2xl border border-danger-line bg-danger-soft px-4 py-3 text-sm leading-relaxed text-danger-text">
             {error}
           </p>
         )}
@@ -87,59 +126,40 @@ export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSet
           event.preventDefault()
           submit()
         }}
-        className="safe-bottom flex items-end gap-2 border-t border-ink-800 bg-ink-900 px-4 pt-3"
+        className="safe-bottom flex items-end gap-2.5 border-t border-line bg-canvas px-4 pt-3"
       >
         <input
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="说点什么…"
-          className="min-w-0 flex-1 rounded-full bg-ink-850 px-4 py-2.5 text-sm text-ink-100 outline-none ring-1 ring-inset ring-ink-800 placeholder:text-ink-500 focus:ring-2 focus:ring-accent-600"
+          className="field min-w-0 flex-1 px-4 py-3 text-sm leading-5"
         />
         <button
           type="submit"
+          aria-label="发送"
           disabled={isGenerating || input.trim() === ''}
-          className="shrink-0 rounded-full bg-accent-500 px-5 py-2.5 text-sm font-semibold text-ink-950 transition-transform duration-150 active:scale-95 disabled:opacity-40"
+          className="mb-px flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-accent-ink transition-transform duration-150 ease-[var(--ease-out-quart)] active:scale-95 disabled:opacity-35"
         >
-          发送
+          <svg aria-hidden viewBox="0 0 20 20" className="h-5 w-5" fill="none">
+            <path
+              d="M10 16V4.5M10 4.5 5 9.5M10 4.5l5 5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
       </form>
     </>
   )
 }
 
-interface HeaderButtonProps {
-  onClick: () => void
-  children: string
-}
-
-/** 头部次级动作：默认安静，悬停时才让主色进来。 */
-function HeaderButton({ onClick, children }: HeaderButtonProps) {
+/** 关系行里的分隔符：一个不抢戏的细点 */
+function Separator() {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-full px-3 py-1.5 text-sm text-ink-400 transition-colors hover:bg-ink-850 hover:text-accent-200"
-    >
-      {children}
-    </button>
-  )
-}
-
-interface ChipProps {
-  tone?: 'plain' | 'accent'
-  children: ReactNode
-}
-
-/** 关系状态用的紧凑标签；主色只留给「阶段」这一个最有信息量的位置。 */
-function Chip({ tone = 'plain', children }: ChipProps) {
-  const skin =
-    tone === 'accent'
-      ? 'border-accent-900 bg-accent-950 text-accent-200'
-      : 'border-ink-800 bg-ink-900 text-ink-400'
-
-  return (
-    <span className={`rounded-full border px-2 py-0.5 text-[11px] leading-5 ${skin}`}>
-      {children}
+    <span aria-hidden className="px-1.5 text-line-strong">
+      ·
     </span>
   )
 }
@@ -147,25 +167,51 @@ function Chip({ tone = 'plain', children }: ChipProps) {
 interface BubbleProps {
   role: Speaker
   content: string
+  /** 是否是该说话方这一串消息的第一条；用来做疏密节奏 */
+  first: boolean
   pending?: boolean
   testId?: string
 }
 
-function Bubble({ role, content, pending = false, testId }: BubbleProps) {
+function Bubble({ role, content, first, pending = false, testId }: BubbleProps) {
   const isUser = role === 'user'
 
   return (
-    <div className={isUser ? 'flex justify-end' : 'flex justify-start'} data-testid={testId}>
+    <div
+      className={[
+        'flex',
+        first ? 'mt-4' : 'mt-1',
+        isUser ? 'justify-end' : 'justify-start',
+      ].join(' ')}
+      data-testid={testId}
+    >
       <div
         className={[
-          'bubble rise-in max-w-[80%] whitespace-pre-wrap px-3.5 py-2.5 text-sm leading-relaxed',
+          'bubble rise-in max-w-[78%] whitespace-pre-wrap px-4 py-2.5 text-sm leading-[1.7]',
           isUser
-            ? 'bubble-from-you bg-accent-900 text-accent-200'
-            : 'bubble-from-her bg-ink-850 text-ink-100 ring-1 ring-inset ring-ink-800',
+            ? 'bubble-from-you bg-accent-soft text-text'
+            : 'bubble-from-her bg-surface text-text',
         ].join(' ')}
       >
-        {content === '' && pending ? <span className="text-ink-500">…</span> : content}
+        {content}
+        {pending && (content === '' ? <TypingDots /> : <span aria-hidden className="caret" />)}
       </div>
     </div>
+  )
+}
+
+/**
+ * 等第一个字时的呼吸点。
+ *
+ * 用空元素而不是文字，因此气泡的 textContent 仍是空串——e2e 靠"最终文本的前缀"
+ * 判定逐字中间态，任何文字都会污染那个判定。
+ */
+function TypingDots() {
+  return (
+    <span aria-hidden className="typing-dots">
+      <i />
+      <i />
+      <i />
+    </span>
   )
 }

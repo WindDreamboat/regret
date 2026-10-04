@@ -1,58 +1,114 @@
 @import "tailwindcss";
 
 /*
-  「暖夜玫瑰」视觉令牌。
+  「暖夜」双主题令牌。
 
-  两处刻意的选择：
-  1. 中性色不是纯灰——每一档都带一丝玫瑰色相（chroma ≈ 0.010-0.016），让整屏与主色同温，
-     暗色下不至于发死。
-  2. 暗色层次靠表面明度而非阴影：Android WebView 上更稳，也符合暗色主题的观感。
+  设计上下文见仓库根目录 `.impeccable.md`：温存、私密、有呼吸感；层级靠明度与留白，
+  不靠边框与卡片；主色稀缺，只落在「她在说话」与「关系在前进」两件事上。
+
+  三条刻意的决定：
+  1. 中性色每一档都带玫瑰色相（hue ≈ 20–25），暗色不发闷、浅色不发冷。
+  2. 明暗同源：两套值角色一一对应，浅色不是把暗色反相，而是「白天同一盏灯」——暖纸而非纯白。
+  3. 组件只认语义令牌（canvas/surface/line/text/accent…），不认具体色值，因此新颜色必须先想
+     它在两套主题里的角色再定值。
 */
+:root {
+  /* 让滚动条、range、日期选择器等系统 UI 跟随主题 */
+  color-scheme: dark light;
+
+  /* 暗色：深夜那盏没关的灯 */
+  --c-canvas: oklch(15.5% 0.012 20);
+  --c-surface: oklch(21.5% 0.014 20);
+  --c-surface-raised: oklch(25% 0.015 20);
+  --c-line: oklch(30% 0.013 20);
+  --c-line-strong: oklch(38% 0.014 20);
+  --c-text: oklch(95% 0.008 20);
+  --c-muted: oklch(74% 0.012 20);
+  --c-faint: oklch(63% 0.012 20);
+  --c-accent: oklch(70% 0.16 15);
+  --c-accent-soft: oklch(27% 0.052 15);
+  --c-accent-line: oklch(37% 0.08 15);
+  --c-accent-ink: oklch(18% 0.03 20);
+  --c-accent-text: oklch(84% 0.08 15);
+  --c-danger: oklch(66% 0.19 25);
+  --c-danger-soft: oklch(26% 0.07 25);
+  --c-danger-line: oklch(36% 0.1 25);
+  --c-danger-text: oklch(80% 0.11 25);
+  --c-glow: oklch(27% 0.055 15);
+  --glow-shape: 125% 78% at 50% -12%;
+  --glow-stop: 62%;
+  /* 暗色靠明度差就能分层，气泡不需要描边；浅色需要一根发丝线 */
+  --c-surface-line: transparent;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    /* 浅色：同一盏灯白天的样子，暖纸而非纯白 */
+    --c-canvas: oklch(97.5% 0.008 25);
+    --c-surface: oklch(99% 0.005 25);
+    --c-surface-raised: oklch(99.6% 0.004 25);
+    --c-line: oklch(90% 0.011 25);
+    --c-line-strong: oklch(82% 0.014 25);
+    --c-text: oklch(26% 0.02 25);
+    --c-muted: oklch(48% 0.018 25);
+    --c-faint: oklch(56% 0.016 25);
+    --c-accent: oklch(54% 0.17 18);
+    --c-accent-soft: oklch(93% 0.035 20);
+    --c-accent-line: oklch(84% 0.06 20);
+    --c-accent-ink: oklch(99% 0.005 20);
+    --c-accent-text: oklch(42% 0.15 18);
+    --c-danger: oklch(50% 0.19 25);
+    --c-danger-soft: oklch(95% 0.03 25);
+    --c-danger-line: oklch(86% 0.07 25);
+    --c-danger-text: oklch(42% 0.17 25);
+    /*
+      浅色的光晕刻意又小又淡：整屏泛粉会变成"粉色壁纸"，那不是纸，是糖纸。
+      只在她所在的上方留一点暖意。
+    */
+    --c-glow: oklch(96.5% 0.014 22);
+    --glow-shape: 72% 26% at 50% -8%;
+    --glow-stop: 86%;
+    --c-surface-line: oklch(93% 0.008 25);
+  }
+}
+
 @theme {
-  --color-ink-950: oklch(16% 0.01 20);
-  --color-ink-900: oklch(20% 0.012 20);
-  --color-ink-850: oklch(23% 0.013 20);
-  --color-ink-800: oklch(27% 0.014 20);
-  --color-ink-700: oklch(36% 0.016 20);
-  --color-ink-600: oklch(50% 0.016 20);
-  --color-ink-500: oklch(62% 0.014 20);
-  --color-ink-400: oklch(72% 0.012 20);
-  --color-ink-300: oklch(82% 0.01 20);
-  --color-ink-200: oklch(89% 0.008 20);
-  --color-ink-100: oklch(96% 0.006 20);
+  --color-canvas: var(--c-canvas);
+  --color-surface: var(--c-surface);
+  --color-surface-raised: var(--c-surface-raised);
+  --color-line: var(--c-line);
+  --color-line-strong: var(--c-line-strong);
+  --color-text: var(--c-text);
+  --color-muted: var(--c-muted);
+  --color-faint: var(--c-faint);
+  --color-accent: var(--c-accent);
+  --color-accent-soft: var(--c-accent-soft);
+  --color-accent-line: var(--c-accent-line);
+  --color-accent-ink: var(--c-accent-ink);
+  --color-accent-text: var(--c-accent-text);
+  --color-danger: var(--c-danger);
+  --color-danger-soft: var(--c-danger-soft);
+  --color-danger-line: var(--c-danger-line);
+  --color-danger-text: var(--c-danger-text);
 
-  --color-accent-200: oklch(90% 0.05 15);
-  --color-accent-300: oklch(82% 0.09 15);
-  --color-accent-400: oklch(74% 0.14 15);
-  --color-accent-500: oklch(68% 0.17 15);
-  --color-accent-600: oklch(60% 0.19 15);
-  --color-accent-700: oklch(50% 0.18 15);
-  --color-accent-900: oklch(30% 0.09 15);
-  --color-accent-950: oklch(22% 0.05 15);
+  /*
+    中文场景 + 离线 App：无法打包 CJK 字体（几 MB 起），因此用系统字栈，
+    特色靠排版手法（字号阶梯、行高、字距、tabular-nums）而非异体字。
+  */
+  --font-sans:
+    "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei",
+    system-ui, -apple-system, sans-serif;
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* 应用底：暖玫瑰光晕自顶部泻下，落入深底。纯色渐变，不含透明度，WebView 渲染稳。 */
+/* 应用底：暖光自顶部泻下，落入底色。纯色渐变、不含透明度，WebView 上渲染稳。 */
 .app-canvas {
-  background-color: var(--color-ink-950);
-  background-image: radial-gradient(
-    130% 92% at 50% -18%,
-    var(--color-accent-950),
-    var(--color-ink-950) 64%
-  );
-}
-
-/*
-  气泡形态：说话的一侧收一个角。
-  用长写属性单独覆盖，避免与 Tailwind 圆角简写的层序不确定。
-*/
-.bubble {
-  border-radius: 1.35rem;
-}
-.bubble-from-her {
-  border-bottom-left-radius: 0.4rem;
-}
-.bubble-from-you {
-  border-bottom-right-radius: 0.4rem;
+  background-color: var(--c-canvas);
+  background-image: radial-gradient(var(--glow-shape), var(--c-glow), var(--c-canvas) var(--glow-stop));
 }
 
 /* 安全区：打包成 App 后避开状态栏与手势条；桌面浏览器下 env() 为 0，退化为普通内边距。 */
@@ -63,11 +119,163 @@
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 
+/* 长列表用细滚动条，避免默认粗条打断留白 */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-line-strong) transparent;
+}
+
+/*
+  输入类控件的统一外皮。
+  用 box-shadow 而非 border 画 1px：不参与布局，聚焦时只换内外描边，尺寸不跳。
+*/
+.field {
+  width: 100%;
+  border-radius: 0.875rem;
+  background-color: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-line);
+  outline: none;
+  transition: box-shadow 180ms var(--ease-out-quart);
+}
+.field::placeholder {
+  color: var(--c-faint);
+}
+.field:focus-visible,
+.field:focus {
+  box-shadow: inset 0 0 0 1.5px var(--c-accent);
+}
+
+/* 供 range 等需要「描边而非填充」的控件复用 */
+.hairline {
+  box-shadow: inset 0 0 0 1px var(--c-line);
+}
+
+/*
+  气泡形态：说话的一侧收一个角。
+  用长写属性单独覆盖，避免与 Tailwind 圆角简写的层序不确定。
+*/
+.bubble {
+  border-radius: 1.25rem;
+}
+.bubble-from-her {
+  border-bottom-left-radius: 0.35rem;
+  /* 浅色下靠一根发丝线把她的话从纸面上托起来；暗色下该线为透明 */
+  box-shadow: inset 0 0 0 1px var(--c-surface-line);
+}
+.bubble-from-you {
+  border-bottom-right-radius: 0.35rem;
+}
+
+/* 名字前那颗灯：小而暖，意思是"她在" */
+.presence {
+  flex: none;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background-color: var(--c-accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--c-accent) 16%, transparent);
+}
+
+/*
+  等第一个字时的「呼吸点」。
+  上游可能是十几秒才吐第一个字（实测该网关首字 18.8 s），此时单个光标看着像卡住了；
+  三个错开呼吸的点，是不用文字就能读懂"她在打字"的表达。
+  只在「一个字都还没到」时出现——有字之后交给光标。
+*/
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.26rem;
+  height: 1.25em;
+}
+.typing-dots i {
+  width: 0.26rem;
+  height: 0.26rem;
+  border-radius: 9999px;
+  background-color: var(--c-faint);
+}
+@keyframes dot-breathe {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 0.85;
+    transform: translateY(-0.12rem);
+  }
+}
+
+/* 生成中的光标：只做元素本身，不带文本，因此不会污染气泡文本 */
+.caret {
+  display: inline-block;
+  width: 0.45em;
+  height: 1.05em;
+  margin-left: 0.12em;
+  vertical-align: -0.16em;
+  border-radius: 1px;
+  background-color: currentColor;
+  opacity: 0.7;
+}
+
+/*
+  分类切换的指示条：从左侧展开。
+  状态变化的动效，比"整体淡入"更能表达"换了一类"。
+*/
+@keyframes underline-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.35);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tab-underline {
+  transform-origin: left center;
+}
+
+/*
+  旋钮：默认 range 在暗色下是一根粗灰槽，与这套语言不搭。
+  改成"细线 + 小圆点"，并把当前值交给 --fill 表现已走过的部分。
+*/
+.range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 1.25rem;
+  background: transparent;
+}
+.range::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 9999px;
+  background-color: var(--c-line-strong);
+}
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: -0.4375rem;
+  border-radius: 9999px;
+  background-color: var(--c-accent);
+  box-shadow: 0 0 0 4px var(--c-canvas);
+}
+.range:focus-visible {
+  outline: none;
+}
+.range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 4px var(--c-canvas),
+    0 0 0 6px var(--c-accent);
+}
+
 /* 消息入场：只动位移与不透明度，绝不碰颜色——e2e 会读气泡的 computed 颜色。 */
 @keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -75,8 +283,47 @@
   }
 }
 
+@keyframes caret-blink {
+  0%,
+  45% {
+    opacity: 0.7;
+  }
+  55%,
+  100% {
+    opacity: 0.12;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .rise-in {
-    animation: rise-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: rise-in 260ms var(--ease-out-expo) both;
+  }
+  .caret {
+    animation: caret-blink 1.1s steps(1, end) infinite;
+  }
+  .tab-underline {
+    animation: underline-in 220ms var(--ease-out-expo) both;
+  }
+  .typing-dots i {
+    animation: dot-breathe 1.4s var(--ease-out-quart) infinite;
+  }
+  .typing-dots i:nth-child(2) {
+    animation-delay: 0.18s;
+  }
+  .typing-dots i:nth-child(3) {
+    animation-delay: 0.36s;
+  }
+}
+
+/* 关掉动效时静态呈现，但仍能表达"在等"：三点亮度递减 */
+@media (prefers-reduced-motion: reduce) {
+  .typing-dots i {
+    opacity: 0.4;
+  }
+  .typing-dots i:nth-child(2) {
+    opacity: 0.55;
+  }
+  .typing-dots i:nth-child(3) {
+    opacity: 0.7;
   }
 }
