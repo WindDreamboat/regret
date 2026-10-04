@@ -30,8 +30,12 @@ playwright/.cache/
 
 # Capacitor 原生工程（在装有 Android SDK 的机器上由 npx cap add android 生成）
 # 不入库的原因：local.properties 会写入本机 SDK 绝对路径，assets/public 会重复拷入 dist 产物
-android/
-ios/
+# 必须锚定到仓库根：插件里的 plugins/*/android/ 是**源码**，要入库
+/android/
+/ios/
+
+# 原生插件的构建产物（源码在 plugins/*/android/src/，要入库）
+plugins/*/android/build/
 # 签名文件绝不入库
 *.keystore
 *.jks

@@ -1,0 +1,18 @@
+{
+  "name": "@regret/stream-http",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor 插件：由原生层发起 HTTP 并逐行回调（流式读 SSE），用于厂商接口不支持跨源时的直连",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "files": ["index.js", "index.d.ts", "android/"],
+  "peerDependencies": {
+    "@capacitor/core": "^8.0.0"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  }
+}

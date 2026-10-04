@@ -1,6 +1,7 @@
 import { DeepSeekAdapter } from '../adapters/llm/DeepSeekAdapter'
 import { MockChatProvider } from '../adapters/llm/MockChatProvider'
 import { createNativeFetch } from '../adapters/llm/nativeFetch'
+import { createNativeStreamFetch } from '../adapters/llm/nativeStreamFetch'
 import { IdbStore } from '../adapters/storage/IdbStore'
 import { DEFAULT_CHAT_CONFIG, type ChatConfig } from '../core/llm/config'
 import type { ChatProvider } from '../core/llm/ChatProvider'
@@ -32,8 +33,9 @@ function createChatProvider(config: ChatConfig): ChatProvider {
     return new MockChatProvider({ delayMs: 30 })
   }
 
-  // 原生传输只在 App 里存在（Web 上为 undefined）：厂商不回 CORS 头时靠它兜底
-  const nativeFetch = createNativeFetch()
+  // 原生传输只在 App 里存在（Web 上为 undefined）：厂商不回 CORS 头时靠它兜底。
+  // 优先流式（能把上游逐字吐的内容及时显示），插件不可用时退回整包。
+  const nativeFetch = createNativeStreamFetch() ?? createNativeFetch()
 
   return new DeepSeekAdapter({
     mode: config.provider === 'direct' ? 'direct' : 'proxy',
