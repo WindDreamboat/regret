@@ -1,6 +1,7 @@
 import { DeepSeekAdapter } from '../adapters/llm/DeepSeekAdapter'
 import { MockChatProvider } from '../adapters/llm/MockChatProvider'
 import { IdbStore } from '../adapters/storage/IdbStore'
+import { DEFAULT_CHAT_CONFIG, type ChatConfig } from '../core/llm/config'
 import type { ChatProvider } from '../core/llm/ChatProvider'
 import type { MemoryStore } from '../core/memory/MemoryStore'
 
@@ -12,25 +13,21 @@ export interface AppServices {
 /**
  * 组装根：全项目唯一实例化具体实现的地方。
  *
- * 默认走 MockChatProvider，保证没有密钥也能跑通完整链路；把 VITE_CHAT_PROVIDER
- * 设为 deepseek 时改走代理（密钥由代理持有，前端拿不到）。
- * 浏览器无法得知代理是否配置了密钥，因此这里用显式的非敏感开关，而非自动探测。
- *
- * VITE_CHAT_API_ENDPOINT 用于指定代理的**绝对地址**：Web 部署下同源，默认相对
- * 路径 `/api/chat` 即可；打包成 App 后 WebView 来源是 capacitor 协议，
- * 相对路径会指向本地不存在的地址，必须在构建期给出真实代理 URL。
+ * 连接配置由设置页维护（见 `features/settings/chatConfigStorage.ts`，未配置时回退到
+ * 构建期 `.env`）。默认走 `MockChatProvider`，保证没有密钥也能跑通完整链路；选
+ * `deepseek` 时改走代理，连接配置随请求头透传（留空项由代理侧环境变量兜底）。
  */
-export function createServices(
-  provider: string | undefined = import.meta.env.VITE_CHAT_PROVIDER,
-  endpoint: string | undefined = import.meta.env.VITE_CHAT_API_ENDPOINT,
-): AppServices {
-  const proxyEndpoint = endpoint?.trim()
-
+export function createServices(config: ChatConfig = DEFAULT_CHAT_CONFIG): AppServices {
   return {
     // delayMs 必须大于 0，否则 Mock 会一次性吐出整句，演示路径上看不到流式效果
     chatProvider:
-      provider === 'deepseek'
-        ? new DeepSeekAdapter(proxyEndpoint ? { endpoint: proxyEndpoint } : {})
+      config.provider === 'deepseek'
+        ? new DeepSeekAdapter({
+            ...(config.endpoint !== '' ? { endpoint: config.endpoint } : {}),
+            ...(config.apiKey !== '' ? { apiKey: config.apiKey } : {}),
+            ...(config.baseUrl !== '' ? { baseUrl: config.baseUrl } : {}),
+            ...(config.model !== '' ? { model: config.model } : {}),
+          })
         : new MockChatProvider({ delayMs: 30 }),
     memoryStore: new IdbStore(),
   }

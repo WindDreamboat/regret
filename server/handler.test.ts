@@ -227,3 +227,86 @@ describe('createChatHandler 跨源（打包后的 WebView）', () => {
     expect(denied.headers.get('Access-Control-Allow-Origin')).toBeNull()
   })
 })
+
+describe('createChatHandler 客户端连接配置（设置页透传）', () => {
+  function postWithHeaders(headers: Record<string, string>, body: unknown = validBody): Request {
+    return new Request('https://app.test/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('客户端 Key 覆盖环境变量', async () => {
+    const fetchImpl = vi.fn<HttpFetch>(async () => sseUpstream())
+    const handler = createChatHandler({ env, fetchImpl })
+
+    await handler(postWithHeaders({ Authorization: 'Bearer sk-client' }))
+
+    const [, init] = fetchImpl.mock.calls[0] ?? []
+    expect(init?.headers).toMatchObject({ Authorization: 'Bearer sk-client' })
+  })
+
+  it('客户端未提供 Key（空或非 Bearer）时回退环境变量', async () => {
+    const fetchImpl = vi.fn<HttpFetch>(async () => sseUpstream())
+    const handler = createChatHandler({ env, fetchImpl })
+
+    await handler(postWithHeaders({ Authorization: 'Bearer   ' }))
+    await handler(postWithHeaders({ Authorization: 'Basic abc' }))
+
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(init?.headers).toMatchObject({ Authorization: 'Bearer sk-test-secret' })
+    }
+  })
+
+  it('客户端网关与模型覆盖环境变量，且 /v1 拼接仍只保留一个', async () => {
+    const fetchImpl = vi.fn<HttpFetch>(async () => sseUpstream())
+    const handler = createChatHandler({ env, fetchImpl })
+
+    await handler(
+      postWithHeaders({
+        Authorization: 'Bearer sk-client',
+        'X-Chat-Base-Url': 'https://gw.example.com/v1',
+        'X-Chat-Model': 'flash',
+      }),
+    )
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    expect(url).toBe('https://gw.example.com/v1/chat/completions')
+    expect(JSON.parse(String(init?.body))).toMatchObject({ model: 'flash' })
+  })
+
+  it('只提供部分字段时其余回退环境变量', async () => {
+    const fetchImpl = vi.fn<HttpFetch>(async () => sseUpstream())
+    const handler = createChatHandler({ env, fetchImpl })
+
+    await handler(postWithHeaders({ 'X-Chat-Model': 'flash' }))
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    expect(url).toBe('https://api.example.com/v1/chat/completions')
+    expect(init?.headers).toMatchObject({ Authorization: 'Bearer sk-test-secret' })
+    expect(JSON.parse(String(init?.body))).toMatchObject({ model: 'flash', stream: true })
+  })
+
+  it('客户端与环境变量都没有 Key 时返回 500', async () => {
+    const fetchImpl = vi.fn<HttpFetch>()
+    const handler = createChatHandler({ env: { ...env, DEEPSEEK_API_KEY: '' }, fetchImpl })
+
+    const response = await handler(postWithHeaders({ Authorization: 'Basic abc' }))
+
+    expect(response.status).toBe(500)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('预检声明 Authorization 与两个自定义请求头', async () => {
+    const handler = createChatHandler({ env, fetchImpl: vi.fn<HttpFetch>() })
+
+    const response = await handler(corsRequest('OPTIONS', 'https://localhost'))
+    const allowed = response.headers.get('Access-Control-Allow-Headers') ?? ''
+
+    expect(allowed).toContain('Content-Type')
+    expect(allowed).toContain('Authorization')
+    expect(allowed).toContain('X-Chat-Base-Url')
+    expect(allowed).toContain('X-Chat-Model')
+  })
+})

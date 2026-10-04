@@ -419,3 +419,40 @@ test('危险操作可就地取消，不会清除数据', async ({ page }) => {
   await expect(page.locator(BUBBLES)).toHaveCount(3)
   await expect(page.locator(BUBBLES).last()).toHaveText(replyTo('你好'))
 })
+
+test('设置页填写的连接配置刷新后保留', async ({ page }) => {
+  await gotoApp(page)
+  await openSettings(page)
+
+  // provider 保持演示模式，其余字段只做持久化验证，不发起真实请求
+  await page.getByLabel('代理地址').fill('/api/chat')
+  await page.getByLabel('API Key').fill('sk-local')
+  await page.getByLabel('网关地址').fill('https://gw.example.com/v1')
+  await page.getByLabel('模型名').fill('flash')
+
+  await page.reload()
+  await openSettings(page)
+
+  await expect(page.getByLabel('代理地址')).toHaveValue('/api/chat')
+  await expect(page.getByLabel('API Key')).toHaveValue('sk-local')
+  await expect(page.getByLabel('网关地址')).toHaveValue('https://gw.example.com/v1')
+  await expect(page.getByLabel('模型名')).toHaveValue('flash')
+})
+
+test('恢复出厂设置会清掉连接配置', async ({ page }) => {
+  await gotoApp(page)
+  await openSettings(page)
+
+  await page.getByLabel('对话服务').selectOption('deepseek')
+  await page.getByLabel('代理地址').fill('/api/chat')
+  await page.getByLabel('模型名').fill('flash')
+
+  await page.getByRole('button', { name: '恢复出厂设置' }).click()
+  await page.getByRole('button', { name: '确认恢复' }).click()
+
+  await expect(page.locator('header h1')).toHaveText('小满')
+  await openSettings(page)
+  await expect(page.getByLabel('对话服务')).toHaveValue('mock')
+  await expect(page.getByLabel('代理地址')).toHaveValue('')
+  await expect(page.getByLabel('模型名')).toHaveValue('')
+})

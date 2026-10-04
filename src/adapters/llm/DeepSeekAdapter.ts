@@ -1,12 +1,19 @@
 import type { ChatProvider } from '../../core/llm/ChatProvider'
+import { CHAT_CONFIG_HEADERS } from '../../core/llm/config'
 import type { ChatMessage, StreamEvent } from '../../core/llm/protocol'
 
 /** 最小 fetch 依赖，便于测试注入 */
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>
 
 export interface DeepSeekAdapterOptions {
-  /** 代理端点，默认 /api/chat。密钥由代理持有，不经过前端。 */
+  /** 代理端点，默认 /api/chat */
   endpoint?: string
+  /** API Key；非空时随请求头透传给代理，覆盖代理侧的环境变量 */
+  apiKey?: string
+  /** 上游网关地址；非空时随请求头透传给代理 */
+  baseUrl?: string
+  /** 模型名；非空时随请求头透传给代理 */
+  model?: string
   fetchImpl?: FetchLike
 }
 
@@ -15,16 +22,32 @@ const DEFAULT_ENDPOINT = '/api/chat'
 /**
  * 对话提供方适配器。
  *
- * 请求发往自建代理而非 DeepSeek 官方接口，密钥只在代理侧。代理原样透传
- * DeepSeek 的 SSE，因此这里解析的是 OpenAI 兼容格式。
+ * 请求发往自建代理而非 DeepSeek 官方接口。连接配置（Key / 网关 / 模型）由设置页提供，
+ * 非空时随请求头透传、覆盖代理侧环境变量；为空则不发送该头，由代理回退。代理原样
+ * 透传 DeepSeek 的 SSE，因此这里解析的是 OpenAI 兼容格式。
  */
 export class DeepSeekAdapter implements ChatProvider {
   private readonly endpoint: string
+  private readonly apiKey: string
+  private readonly baseUrl: string
+  private readonly model: string
   private readonly fetchImpl: FetchLike
 
   constructor(options: DeepSeekAdapterOptions = {}) {
     this.endpoint = options.endpoint ?? DEFAULT_ENDPOINT
+    this.apiKey = options.apiKey ?? ''
+    this.baseUrl = options.baseUrl ?? ''
+    this.model = options.model ?? ''
     this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init))
+  }
+
+  /** 空的连接配置不发送对应头，未配置时请求与引入前逐字节一致。 */
+  private headers(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (this.apiKey !== '') headers[CHAT_CONFIG_HEADERS.apiKey] = `Bearer ${this.apiKey}`
+    if (this.baseUrl !== '') headers[CHAT_CONFIG_HEADERS.baseUrl] = this.baseUrl
+    if (this.model !== '') headers[CHAT_CONFIG_HEADERS.model] = this.model
+    return headers
   }
 
   async *stream(messages: ChatMessage[]): AsyncIterable<StreamEvent> {
@@ -32,7 +55,7 @@ export class DeepSeekAdapter implements ChatProvider {
     try {
       response = await this.fetchImpl(this.endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.headers(),
         body: JSON.stringify({ messages }),
       })
     } catch (error) {

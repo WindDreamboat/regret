@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import type { AppServices } from '../../composition/root'
+import type { ChatConfig, ChatProviderKind } from '../../core/llm/config'
 import { CHALLENGE_MIN, DEFAULT_STRATEGY, type StrategyProfile } from '../../core/strategy/types'
 import { clearConversation, downloadMemoryExport, resetToFactory } from './dataManagement'
 
 export interface SettingsPageProps {
   services: AppServices
   strategy: StrategyProfile
+  chatConfig: ChatConfig
   /** 即时生效：滑块一变就回写，无保存按钮 */
   onChange: (strategy: StrategyProfile) => void
+  /** 即时生效：改一个字符就回写，无保存按钮 */
+  onChangeChatConfig: (chatConfig: ChatConfig) => void
   onReset: () => void
   onBack: () => void
 }
@@ -34,11 +38,23 @@ function bandOf(value: number, base: number): string {
   return '默认'
 }
 
-export function SettingsPage({ services, strategy, onChange, onReset, onBack }: SettingsPageProps) {
+export function SettingsPage({
+  services,
+  strategy,
+  chatConfig,
+  onChange,
+  onChangeChatConfig,
+  onReset,
+  onBack,
+}: SettingsPageProps) {
   const [dataError, setDataError] = useState<string | null>(null)
 
   const update = (key: keyof StrategyProfile, value: number) => {
     onChange({ ...strategy, [key]: value })
+  }
+
+  const patchChatConfig = (patch: Partial<ChatConfig>) => {
+    onChangeChatConfig({ ...chatConfig, ...patch })
   }
 
   const runDataAction = async (action: () => Promise<void>) => {
@@ -95,6 +111,58 @@ export function SettingsPage({ services, strategy, onChange, onReset, onBack }: 
             </div>
           )
         })}
+
+        <div className="border-t border-neutral-800 pt-5">
+          <h2 className="text-sm text-neutral-300">连接</h2>
+          <p className="mt-1 text-xs text-neutral-500">
+            在这里填就不必改程序里的配置文件。留空的项由你的代理兜底；密钥只保存在这台设备，只会发给你的代理。
+          </p>
+
+          <div className="mt-3 space-y-3">
+            <label className="block">
+              <span className="text-sm text-neutral-300">对话服务</span>
+              <select
+                value={chatConfig.provider}
+                onChange={(event) =>
+                  patchChatConfig({ provider: event.target.value as ChatProviderKind })
+                }
+                className="mt-1 w-full rounded-md bg-neutral-900 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-neutral-700"
+              >
+                <option value="mock">演示模式（本地回声）</option>
+                <option value="deepseek">真实模型</option>
+              </select>
+            </label>
+
+            <ConfigField
+              label="代理地址"
+              value={chatConfig.endpoint}
+              placeholder="https://your-proxy.example.com/api/chat"
+              hint="选真实模型时要填；打包成 App 后不能留空"
+              onChange={(value) => patchChatConfig({ endpoint: value })}
+            />
+            <ConfigField
+              label="API Key"
+              type="password"
+              value={chatConfig.apiKey}
+              placeholder="留空则用代理里的密钥"
+              onChange={(value) => patchChatConfig({ apiKey: value })}
+            />
+            <ConfigField
+              label="网关地址"
+              value={chatConfig.baseUrl}
+              placeholder="https://api.deepseek.com"
+              hint="留空则用代理里的默认网关"
+              onChange={(value) => patchChatConfig({ baseUrl: value })}
+            />
+            <ConfigField
+              label="模型名"
+              value={chatConfig.model}
+              placeholder="deepseek-flash"
+              hint="留空则用代理里的默认模型"
+              onChange={(value) => patchChatConfig({ model: value })}
+            />
+          </div>
+        </div>
 
         <div className="border-t border-neutral-800 pt-5">
           <h2 className="text-sm text-neutral-300">数据</h2>
@@ -188,5 +256,39 @@ function DestructiveRow({ label, hint, confirmLabel, onConfirm }: DestructiveRow
         </button>
       </div>
     </div>
+  )
+}
+
+interface ConfigFieldProps {
+  label: string
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+  type?: 'text' | 'password'
+  hint?: string
+}
+
+/** 连接配置的单个输入项：标签 + 输入框（可选说明）；改动即回写，无保存按钮。 */
+function ConfigField({
+  label,
+  value,
+  placeholder,
+  onChange,
+  type = 'text',
+  hint,
+}: ConfigFieldProps) {
+  return (
+    <label className="block">
+      <span className="text-sm text-neutral-300">{label}</span>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete="off"
+        className="mt-1 w-full rounded-md bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:ring-1 focus:ring-neutral-700"
+      />
+      {hint !== undefined && <span className="mt-1 block text-xs text-neutral-600">{hint}</span>}
+    </label>
   )
 }

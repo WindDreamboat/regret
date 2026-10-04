@@ -2,6 +2,7 @@ import type { AppServices } from '../../composition/root'
 import { buildMemoryExport } from '../../core/memory/export'
 import { DEFAULT_SESSION_ID } from '../../core/memory/types'
 import { clearPersona, loadPersona } from '../persona/personaStorage'
+import { clearChatConfig } from './chatConfigStorage'
 import { clearStrategy, loadStrategy } from './strategyStorage'
 
 /**
@@ -59,6 +60,7 @@ export async function resetToFactory(services: AppServices): Promise<void> {
   await services.memoryStore.clearSession(DEFAULT_SESSION_ID)
   clearPersona()
   clearStrategy()
+  clearChatConfig()
   location.reload()
 }
 

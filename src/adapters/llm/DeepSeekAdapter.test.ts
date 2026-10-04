@@ -109,4 +109,36 @@ describe('DeepSeekAdapter', () => {
 
     expect(fetchImpl).toHaveBeenCalledWith('/custom', expect.objectContaining({ method: 'POST' }))
   })
+
+  it('配置齐全时随请求头透传连接配置', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({
+      endpoint: 'https://p.example.com/api/chat',
+      apiKey: 'sk-1',
+      baseUrl: 'https://gw.example.com/v1',
+      model: 'flash',
+      fetchImpl,
+    })
+
+    await collect(adapter.stream(messages))
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    expect(url).toBe('https://p.example.com/api/chat')
+    expect(init?.headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer sk-1',
+      'X-Chat-Base-Url': 'https://gw.example.com/v1',
+      'X-Chat-Model': 'flash',
+    })
+  })
+
+  it('未配置连接配置时不多带任何请求头', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({ fetchImpl })
+
+    await collect(adapter.stream(messages))
+
+    const [, init] = fetchImpl.mock.calls[0] ?? []
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+  })
 })

@@ -1,3 +1,4 @@
+import { CHAT_CONFIG_HEADERS } from '../src/core/llm/config.ts'
 import type { ChatMessage, Role } from '../src/core/llm/protocol.ts'
 
 /** 最小 fetch 依赖，便于测试注入 */
@@ -22,7 +23,9 @@ const ROLES: readonly Role[] = ['system', 'user', 'assistant']
  *
  * 基于 Web 标准 Request / Response 编写，因此同一份代码既能被 Vite dev server
  * 挂载，也能直接部署为 serverless function，前端无需感知差别。
- * API Key 只在此处读取，不会进入前端产物。
+ *
+ * 连接配置（Key / 网关 / 模型）优先取客户端随请求头透传的值，其次取环境变量，
+ * 因此「设置页直填」与「只读代理侧 .env」两种用法并存。
  *
  * 打包成 App 后 WebView 来源与代理不同源，浏览器会先发 OPTIONS 预检；
  * 因此这里必须处理预检并回 CORS 头，否则打包版一条消息都发不出去。
@@ -43,7 +46,8 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       return jsonResponse(405, { error: '仅支持 POST' }, origin)
     }
 
-    const apiKey = env['DEEPSEEK_API_KEY']
+    // 优先级：客户端请求头 > 环境变量。头缺失或空白即视为未提供，交由下一级回退。
+    const apiKey = readClientApiKey(request) ?? env['DEEPSEEK_API_KEY']
     if (!apiKey) {
       return jsonResponse(500, { error: '代理未配置 DEEPSEEK_API_KEY' }, origin)
     }
@@ -60,8 +64,13 @@ export function createChatHandler(options: ChatHandlerOptions = {}) {
       return jsonResponse(400, { error: 'messages 缺失或结构非法' }, origin)
     }
 
-    const baseUrl = (env['DEEPSEEK_BASE_URL'] ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
-    const model = env['DEEPSEEK_MODEL'] ?? DEFAULT_MODEL
+    const baseUrl = (
+      readHeader(request, CHAT_CONFIG_HEADERS.baseUrl) ??
+      env['DEEPSEEK_BASE_URL'] ??
+      DEFAULT_BASE_URL
+    ).replace(/\/+$/, '')
+    const model =
+      readHeader(request, CHAT_CONFIG_HEADERS.model) ?? env['DEEPSEEK_MODEL'] ?? DEFAULT_MODEL
     // Base URL 可能已包含 /v1（多数 OpenAI 兼容网关如此），此时不再重复拼接
     const path = baseUrl.endsWith('/v1') ? '/chat/completions' : '/v1/chat/completions'
 
@@ -115,6 +124,25 @@ function resolveAllowedOrigin(
   return allowed.includes(origin) ? origin : null
 }
 
+/**
+ * 取请求头中的非空值；头缺失或全为空白时返回 undefined，表示「未提供」。
+ *
+ * 空串必须与缺失同样对待，否则客户端留空的字段会覆盖掉环境变量。
+ */
+function readHeader(request: Request, name: string): string | undefined {
+  const value = request.headers.get(name)?.trim()
+  return value === undefined || value === '' ? undefined : value
+}
+
+/** 从 Authorization 头取 Bearer 令牌；缺失、为空或非 Bearer 形式均返回 undefined。 */
+function readClientApiKey(request: Request): string | undefined {
+  const header = readHeader(request, CHAT_CONFIG_HEADERS.apiKey)
+  if (header === undefined || !header.startsWith('Bearer ')) return undefined
+
+  const token = header.slice('Bearer '.length).trim()
+  return token === '' ? undefined : token
+}
+
 /** 允许来源确定时才回 CORS 头；`Vary` 保证按来源缓存的正确性。 */
 function corsHeaders(origin: string | null): Record<string, string> {
   if (origin === null) return {}
@@ -127,7 +155,13 @@ function preflightResponse(origin: string | null): Response {
     headers: {
       ...corsHeaders(origin),
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      // Authorization 与两个自定义头不在 CORS 安全名单内，不声明浏览器会拒绝预检
+      'Access-Control-Allow-Headers': [
+        'Content-Type',
+        CHAT_CONFIG_HEADERS.apiKey,
+        CHAT_CONFIG_HEADERS.baseUrl,
+        CHAT_CONFIG_HEADERS.model,
+      ].join(', '),
       'Access-Control-Max-Age': '86400',
     },
   })
