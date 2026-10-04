@@ -195,6 +195,15 @@
 
 ### 修复
 
+- **「导出记忆备份」在真机上点了毫无反应**（真机实测，`adapters/files/fileSave.ts` + 新增原生插件 `plugins/file-save`）：打包版 WebView 不处理 `<a download href="blob:">`——点完 `/sdcard/Download` 无新文件、logcat 无任何下载活动，是一次**静默空点击**（界面上也什么都不会显示）。取证结论是这条路由根本没人接：Capacitor 自带的 60 个 Java 文件里**没有任何 `DownloadListener`**；另一条常见出路 Web Share 也堵死（真机 WebView 实测 `typeof navigator.share === 'undefined'`，Chrome 114）。**Web 与开发环境一直是好的**——e2e 能用 `page.waitForEvent('download')` 接住下载，所以此前没暴露。
+  - 现改为：原生平台走新插件的 `saveText`（SAF `ACTION_CREATE_DOCUMENT`），弹系统「另存为」由用户选位置后写入；Web 仍走 Blob 下载，行为不变。选 SAF 而不是往公共下载目录写：**不需要任何权限**（API 24–36 一套代码），且不必为 API 29 以下再备一条需要存储权限的老路——本机只有 API 29 可验证，那等于留一条没验证过的分支。
+  - 取消与失败分开：用户在对话框里放弃时以 `code: 'CANCELLED'` 拒绝，界面提示「已取消导出」；真失败才报红，且**不回退浏览器下载**（否则文件悄悄进了下载目录，用户以为保存成功）。
+  - 界面补结果回显（成功、取消都说一声）：真机上「保存好了」与「点了没反应」肉眼无法区分，这正是这次报障的由来。
+  - `features/settings/dataManagement.ts`：`downloadMemoryExport` 更名 `exportMemoryBackup` 并返回结果（它已不再总是"下载"）。
+  - 真机复验：系统对话框预填 `regret-backup-2026-10-04.json` → 保存 → `/sdcard/Download/` 落盘 1073 B、JSON 结构完整（`format`/`version`/`persona`/`relation`/`strategy` 齐备）；再点一次并在对话框里按返回 → 界面「已取消导出」、无文件、无报错。测试文件已从设备删净。
+  - 测试：单测 221 → 226（`fileSave.test.ts` 5 例：原生选路、MIME 可覆盖、取消不算失败、失败不回退、Web 与插件缺失时兜底）；e2e 断言导出后回显文案。
+  - **回滚条件**：`git revert` 该提交（连 `package.json` 里 `@regret/file-save` 依赖一并移除）。回滚后打包版的导出恢复成静默空点击，Web 与开发环境不受影响。
+
 - **长对话下底部输入栏被顶出屏幕**（浏览器实测量化）：外壳用的是 `min-h-dvh`——它只给高度**下限**，内容一长就把整页撑高，于是中间的滚动容器不再内部滚动：实测输入栏底边落在 **926px**、视口只有 **844px**，输入栏有 82px 在屏幕外，用户必须整页滚动才能打字。
   - `App.tsx`：外壳改 `h-dvh overflow-hidden`；`ChatPage` / `SettingsPage` 的滚动容器补 `min-h-0`（flex 子项默认 `min-height: auto`，不写它即使有 `overflow` 也不会收缩）；输入栏补一条发丝分隔线，消息列表底部留白 8px → 16px。
   - 验证：同一场景 `inputBottom 926 → 832`、`inputVisible false → true`、整页不再滚动（`documentScrollable false`）、中段自己滚（`mainScrollable true`）。
@@ -227,6 +236,13 @@
 
 - 等待第一个字时改用**呼吸点**而不是单个光标（`index.css` 的 `.typing-dots` + `ChatPage`）：实测该网关**首字要 18.8 s**（之后以每 ~134 ms 一块连续吐 50 s），而原生回退路径是整包返回、这段时间没有任何字可显示——单个光标闪 70 秒看着像卡死。三个错开呼吸的点，是不用文字就能读懂的"她在打字"；有字之后交回光标；`prefers-reduced-motion` 下退化成亮度递减的静态三点。用空元素实现，气泡 `textContent` 仍是空串，不影响 e2e 对"逐字中间态"的判定。
   - **回滚条件**：`git revert` 该提交；回滚后等待期回到单个闪烁光标。
+
+- **备份文件名改用本地日期**（`features/settings/dataManagement.ts`）：原先是 `new Date(ts).toISOString().slice(0, 10)`——**UTC**，东八区凌晨导出会写成前一天（真机实测本地 10-05 00:50 导出得到 `regret-backup-2026-10-04.json`，用户按日期找备份时对不上号）。现改按本地日历取年月日并补零，命名抽成 `backupFileName` 并补单测（单测 226 → 228；断言用**本地字段**构造时刻，因此不依赖运行机器的时区，换 UTC 组装就成了只在东八区成立的脆弱断言）。
+  - 真机复验：本地 01:05 导出得到 `regret-backup-2026-10-05.json`。
+  - **回滚条件**：`git revert` 该提交；回滚后文件名回到 UTC 日期（跨午夜导出会与本地日期差一天）。
+
+- 文档同步「导出记忆备份」的修复：`docs/Android打包指南.md` 的「二·补」由单插件改写为双插件（新增 `plugins/file-save` 小节——为何 WebView 必须由原生弹对话框、为何选 SAF 而非公共下载目录、取消与失败的区别、不想要它时怎么删）；`docs/虚拟伴侣应用_需求简报与开发里程碑.md` 补「第二个原生插件」的决策变更（原生模块从 1 个变 2 个的取舍）。
+  - **回滚条件**：`git checkout HEAD~1 -- docs/Android打包指南.md "docs/虚拟伴侣应用_需求简报与开发里程碑.md"`，纯文档。
 
 - 文档同步本批改动：`docs/Android打包指南.md` 新增「二·补、原生插件 `plugins/stream-http`」小节（为什么需要它、`cap sync` 如何接线、整包回退链、以及"不想要它时怎么删"），直连用法那行补「只填到网关也可以，缺的路径会自动补上，设置页会显示实际请求」；`docs/虚拟伴侣应用_需求简报与开发里程碑.md` 补「首次允许仓库包含原生代码」的决策变更（背景、范围控制、回退路径）。
   - **回滚条件**：`git checkout HEAD~1 -- docs/Android打包指南.md "docs/虚拟伴侣应用_需求简报与开发里程碑.md"`，纯文档，不影响代码与运行。
