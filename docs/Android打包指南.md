@@ -33,50 +33,84 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 仓库已提供脚本：`npm run cap:add`、`npm run cap:sync`、`npm run cap:open`（打开 Android Studio）。
 
-## 三、连接配置：默认值 vs 设置页
+> 本机实测踩过的两个坑：
+> 1. **PATH 里的 `adb` 是老版本**（`C:\Windows\adb.exe` 为 1.0.31），一执行就会「adb server is out of date」并杀掉正在服务的 adb server，连带丢掉 `adb reverse` 映射与 `cap run` 会话。请显式使用 `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`。
+> 2. **编辑器注入的 `NODE_OPTIONS` 删除垫片会让 `cap sync` / `cap copy` 失败**（重建 `assets/` 时报 `[safe-delete] ... trash operation ... aborted`）。跑 Capacitor CLI 前先 `set NODE_OPTIONS=`。
 
-`.env` 里的 `VITE_*` 只是**默认值**，已不是打包版可用的前提：App 内置「设置 → 连接」页，可以直接填对话服务、代理地址、API Key、网关地址与模型名，改动**即时生效，不必重新打包**。
+## 三、连接配置：设置页里填，两种用法
 
-仍建议在 `.env` 给出默认值（页面留空的项会回退到这里或代理侧）：
+`.env` 里的 `VITE_*` 只是**默认值**，已不是打包版可用的前提：App 内置「设置 → 连接」页，可以直接选对话服务、填接口地址、API Key 与模型名，改动**即时生效，不必重新打包**。
+
+真实模型有两种用法，「对话服务」里二选一：
+
+| 用法 | 设置项 | 前提 |
+|----|----|----|
+| **直连厂商**（`direct`） | 接口地址填厂商的**完整接口地址**（如 `https://api.deepseek.com/v1/chat/completions`），API Key 必填，模型名留空即用 `deepseek-chat` | 只要能访问到该接口；**不要求厂商支持跨源**（见下）；Key 存在设备上 |
+| **走自建代理**（`deepseek`） | 代理地址填你的代理 `/api/chat`；Key / 网关 / 模型可留空由代理侧兜底 | 需要自己部署一个转发用 serverless function；代理侧需设 `CHAT_ALLOWED_ORIGIN=https://localhost` |
+
+直连为什么连**不支持 CORS** 的厂商也能用（打包后 WebView 来源是 `https://localhost`，跨源请求会先发 `OPTIONS` 预检）：
+
+- 厂商允许跨源（如 `OPTIONS https://api.deepseek.com/v1/chat/completions` → `200` + `access-control-allow-origin: https://localhost`，且逐条回显请求头）时，走浏览器 fetch，**能拿到逐字流**。
+- 厂商不允许（如 `OPTIONS https://gateway.example.com/api/v1/chat/completions` → `405`，响应里没有任何 `Access-Control-Allow-*`）时，浏览器 fetch 必然失败，App **自动改用系统（原生）网络请求**——原生请求没有同源策略，因此照样直连。此时是**整包返回，没有逐字流**（该网关本来就一次性返回，无差别）。
+- 代理则两条路都用不上：它的存在意义只剩「Key 不落设备 + 服务端限流」，跨域已不是理由。
+
+也可以把默认值写进 `.env`：
 
 ```dotenv
-VITE_CHAT_PROVIDER=deepseek
-VITE_CHAT_API_ENDPOINT=https://<你的代理域名>/api/chat
+# 直连
+VITE_CHAT_PROVIDER=direct
+VITE_CHAT_API_ENDPOINT=https://api.deepseek.com/v1/chat/completions
 ```
 
-- 页面留空的项：前端项回退 `.env`；Key / 网关 / 模型回退**代理侧**环境变量。
-- 代理侧需设 `CHAT_ALLOWED_ORIGIN=https://localhost`，否则预检不会返回允许来源，浏览器会拦截（代理已实现 `OPTIONS` 预检，见 `server/handler.ts`）。
-- 密钥**不要**写进 `VITE_` 变量（会被打进前端产物）：要么留在代理的 `DEEPSEEK_API_KEY`，要么填在设置页（只存设备本地、随请求头透传）。
+- 密钥**不要**写进 `VITE_` 变量（会被打进前端产物）：直连模式的 Key 只能填在设置页（只存设备本地、随请求直接发给厂商）；走代理时可留在代理的 `DEEPSEEK_API_KEY`。
+- 页面留空的项：走代理时回退 `.env` 与**代理侧**环境变量；直连时接口地址与 Key 都必填，缺地址会在对话里给出「请到设置页填接口地址」的提示。
+- 代理已实现 `OPTIONS` 预检与来源白名单，见 `server/handler.ts`。
 
 > 初始 `.env` 若仍是 `VITE_CHAT_PROVIDER=mock` 且未在页面切换，APK 就是只会回显的「回声机」——现在可直接在页面里改为「真实模型」，无需重打包。
 
 ## 四、体积预期
 
-前端产物约 **342 KB JS（gzip 110 KB）+ 12 KB CSS**，其余为 WebView 壳与 Capacitor 运行时，
-距 30 MB 上限很远。实测：
+前端产物约 **347.5 KB JS（gzip 111.8 KB）+ 19.7 KB CSS（gzip 4.6 KB）**，其余为 WebView 壳与
+Capacitor 运行时，距 30 MB 上限很远（真机实测 APK 4.17 MB）。实测：
 
 ```powershell
 (Get-Item android\app\build\outputs\apk\debug\app-debug.apk).Length / 1MB
 ```
 
-## 五、真机验收清单（**未在本仓库验证**）
+## 五、真机验收清单
 
-本仓库的开发环境**没有 Android SDK**，因此下列项目从未在本机验证过，需在真机上逐条确认：
+2026-10-04 在一台 HarmonyOS 真机（GLK-AL00）上实测：
 
-- [ ] APK 可安装并启动
-- [ ] 安装包体积 < 30 MB
-- [ ] 与代理连通（先确认预检通过：抓包应看到 `OPTIONS 204` 后再 `POST 200`）
-- [ ] 长对话响应延迟 < 2 s（需真实代理与密钥）
-- [ ] 关闭再打开应用，对话与设置仍在（`androidScheme: 'https'` 保证来源可持久化）
-- [ ] 键盘弹出不遮挡输入框
-- [ ] 深色界面下状态栏文字可读
+- [x] APK 可安装并启动
+- [x] 安装包体积 < 30 MB（实测 **4.17 MB**）
+- [x] 关闭再打开应用，对话与设置仍在（`androidScheme: 'https'` 保证来源可持久化；实测冷启动后对话、人设、关系与说话方式全部保留，且没有重复写开场白）
+- [x] 键盘弹出不遮挡输入框（WebView 自动缩放，输入框上移后完整可见）
+- [x] 深色界面下状态栏文字可读
+- [x] 与代理连通，预检通过——真机实测（`OPTIONS 204` 后 `POST 200`，两次 POST 分别是主对话与记忆抽取）：
+  - **验证方式**（无公网代理时的等价做法）：把同一份 `server/handler.ts` 起成一个裸 http server 顶替 serverless（**不是** Vite 插件——Vite 自带 CORS 中间件会抢在 handler 之前应答 `OPTIONS`，开发环境因此永远测不到线上那条预检路径），再 `adb reverse tcp:5176 tcp:5176`，让打包版把接口地址填成 `http://localhost:5176/api/chat`。
+  - 代理侧日志（`OPTIONS` 的 `Access-Control-Allow-Origin` 与 `Access-Control-Allow-Methods: POST, OPTIONS` 均来自我们的 handler）：
+    ```
+    OPTIONS /api/chat origin=https://localhost → 204 allow-origin=https://localhost
+    POST    /api/chat origin=https://localhost → 200  耗时=1478ms 请求体=2062B
+    POST    /api/chat origin=https://localhost → 200  耗时=2036ms 请求体=1076B（记忆抽取）
+    ```
+  - **为了在真机上跑通这条链路，改的是生成工程（不入库），不是仓库配置**：`android/app/src/main/AndroidManifest.xml` 加 `android:usesCleartextTraffic="true"`，`assets/capacitor.config.json` 加 `server.cleartext` / `android.allowMixedContent` / `android.webContentsDebuggingEnabled`。**`server.cleartext` 不会自己写进清单**——实测 WebView 对 `http://localhost:5176` 直接报 `net::ERR_CLEARTEXT_NOT_PERMITTED`，这是 Android 的明文策略，与混合内容无关。
+  - **仍未验证**：真正公网 https 代理（TLS 握手、真实跨网时延、代理侧限流）。上述验证覆盖了除去 TLS 以外的全部代码路径。
+- [x] 直连模式的跨源可达性：真机上填厂商接口地址 + 一个**无效** Key，回复为「接口返回 401」而非 `Failed to fetch`，说明 WebView 的预检被厂商放行、请求确实到了厂商（能拿到 401 就说明连上了，只差有效密钥）。
+- [ ] 长对话响应延迟 < 2 s——**不达标**：真机经 USB 探针实测首字节 **3.17 s**；用同一份请求体在电脑侧复测为 1.9 / 2.3 / 4.3 / 9.8 s，并连续三次出现 **43–46 s**，换短提示词立刻回到 2.4 s。**波动来自上游网关排队，与客户端无关**，此项不由客户端改动决定。
+
+> 直连模式不需要公网代理，可直接在真机上按上一节填厂商接口地址来验证（前提是该厂商接口允许跨源访问）。
 
 ## 六、已知局限
 
-1. **返回键会直接退出应用**：应用没有路由，`canGoBack()` 恒为 false；在设置页按返回不会回到对话页。后续可用 `history.pushState` + `popstate` 修复。
-2. **未处理边到边安全区**：`index.html` 已有 `viewport-fit=cover`，但页头与底部输入栏未加 `env(safe-area-inset-*)` 内边距；Android WebView 对 `env()` 支持不稳定，需真机确认后再补。
+1. **返回键会直接退出应用**：应用没有路由，`canGoBack()` 恒为 false；在设置页按返回不会回到对话页（真机已复现）。后续可用 `history.pushState` + `popstate` 修复。
+2. **边到边安全区只在部分设备上生效**：`index.html` 有 `viewport-fit=cover`，页头与底部栏也加了 `env(safe-area-inset-*)` 内边距；但本机真机的 WebView 并非边到边绘制，`env()` 取值为 0，因此**未在真正边到边的设备上验证过**。
 3. **只有 debug 包可安装**：release 包未签名无法安装；若要发布，keystore 必须在本地生成并**绝不入库**（`.gitignore` 已排除 `*.keystore` / `*.jks`）。
-4. **代理会成为公网入口**：代理本身不鉴权，CORS 只约束浏览器。页面留空时会消耗代理 env 里的 Key，请务必加来源校验与限流，否则任何人都能消耗你的 API Key。
-5. **API Key 会落在设备上**：设置页填的 Key 明文存于设备 localStorage，并随 `Authorization` 头发给代理，会出现在代理访问日志里——代理侧需关闭或脱敏 header 日志。
+4. **走代理时，代理会成为公网入口**：代理本身不鉴权，CORS 只约束浏览器。页面留空时会消耗代理 env 里的 Key，请务必加来源校验与限流，否则任何人都能消耗你的 API Key。**直连模式没有这个入口**（请求直接发往厂商）。
+5. **API Key 会落在设备上**：设置页填的 Key 明文存于设备 localStorage。走代理时它随 `Authorization` 头发给代理、会出现在代理访问日志里（需关闭或脱敏 header 日志）；直连时它直接发给厂商，没有任何中间层可以代持或脱敏。
 6. **清除应用数据会删掉全部本地内容**：对话、记忆、人设与设置都存在设备本地（IndexedDB + localStorage），这是预期行为。
-7. V1 不做 iOS。
+7. **打包版只能走 HTTPS**：`androidScheme: 'https'` 下 WebView 的来源是 `https://localhost`，请求 `http://…` 会被 Android 的明文策略拦成 `net::ERR_CLEARTEXT_NOT_PERMITTED`（要放开得在清单里显式 `android:usesCleartextTraffic="true"` 或用 network security config 放行）。因此代理**必须**提供 https；本地联调只能靠 `adb reverse` 把设备端口映射到本机的 http 服务，并临时放开明文。
+8. **真机排查手段**：`capacitor.config.json` 里打开 `android.webContentsDebuggingEnabled` 后，可用 `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>` + CDP 直接读 WebView 的控制台与网络事件，`Network.loadingFailed` 会给出 `blockedReason`/`errorText`。这条路径比在客户端猜「为什么 `Failed to fetch`」快得多（本次就是靠它定位到 `ERR_CLEARTEXT_NOT_PERMITTED`）。
+9. **演示模式会污染真实模型的对话**：切到真实模型时，历史里若全是 Mock 的回声（`我听到你说：…`），模型会**照着模仿这个格式**。本机实测出现过「真实模型回复成了回声体」的现象——排查时不要据此断定走的是 Mock，应先看代理日志里有没有请求。要干净体验请先「清除对话与记忆」。
+10. **直连不支持跨域的厂商时没有逐字流**：浏览器 fetch 被跨域拦下后由系统网络请求兜底，而原生 HTTP 是**整包返回**，回复会一次性出现（实测该网关整包往返 4.9 s / 6.8 s）。厂商允许跨域时照旧走浏览器、保留逐字流。
+11. V1 不做 iOS。
