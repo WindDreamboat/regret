@@ -41,7 +41,7 @@ export function App() {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-2xl flex-col bg-neutral-950 text-neutral-100">
+    <div className="app-canvas mx-auto flex min-h-dvh max-w-2xl flex-col text-ink-100">
       {view === 'chat' && (
         <ChatPage
           services={services}

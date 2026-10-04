@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { AppServices } from '../../composition/root'
 import type { Speaker } from '../../core/llm/protocol'
 import type { Persona } from '../../core/persona/types'
@@ -38,48 +38,31 @@ export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSet
 
   return (
     <>
-      <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-        <h1 className="text-base font-medium">
+      <header className="safe-top flex items-center justify-between gap-3 border-b border-ink-800 px-4 pb-3">
+        <h1 className="flex items-center gap-2 text-base font-medium tracking-wide">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent-400" />
           {persona.name.trim() === '' ? '虚拟伴侣' : persona.name}
         </h1>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onOpenPersona}
-            className="rounded-md px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-          >
-            人设
-          </button>
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="rounded-md px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-          >
-            设置
-          </button>
+          <HeaderButton onClick={onOpenPersona}>人设</HeaderButton>
+          <HeaderButton onClick={onOpenSettings}>设置</HeaderButton>
         </div>
       </header>
 
       {relation !== null && (
         <div
           data-testid="relation-bar"
-          className="flex items-center gap-2 border-b border-neutral-800 px-4 py-1.5 text-xs text-neutral-500"
+          className="flex items-center gap-1.5 border-b border-ink-800 px-4 py-2"
         >
-          <span>{relation.stage}</span>
-          <span>·</span>
-          <span>亲密度 {relation.intimacy}</span>
-          {relation.mood.trim() !== '' && (
-            <>
-              <span>·</span>
-              <span>{relation.mood}</span>
-            </>
-          )}
+          <Chip tone="accent">{relation.stage}</Chip>
+          <Chip>亲密度 {relation.intimacy}</Chip>
+          {relation.mood.trim() !== '' && <Chip>{relation.mood}</Chip>}
         </div>
       )}
 
-      <main className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <main className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
         {hiddenCount > 0 && (
-          <p className="pb-1 text-center text-xs text-neutral-600">
+          <p className="pb-1 text-center text-xs text-ink-500">
             更早的 {hiddenCount} 条仍保存在本地
           </p>
         )}
@@ -93,7 +76,9 @@ export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSet
         )}
 
         {error !== null && (
-          <p className="rounded-md bg-red-950 px-3 py-2 text-sm text-red-300">{error}</p>
+          <p className="rounded-xl border border-accent-900 bg-accent-950 px-3 py-2 text-sm text-accent-200">
+            {error}
+          </p>
         )}
       </main>
 
@@ -102,23 +87,60 @@ export function ChatPage({ services, persona, strategy, onOpenPersona, onOpenSet
           event.preventDefault()
           submit()
         }}
-        className="flex gap-2 border-t border-neutral-800 px-4 py-3"
+        className="safe-bottom flex items-end gap-2 border-t border-ink-800 bg-ink-900 px-4 pt-3"
       >
         <input
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="说点什么…"
-          className="flex-1 rounded-md bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:ring-1 focus:ring-neutral-700"
+          className="min-w-0 flex-1 rounded-full bg-ink-850 px-4 py-2.5 text-sm text-ink-100 outline-none ring-1 ring-inset ring-ink-800 placeholder:text-ink-500 focus:ring-2 focus:ring-accent-600"
         />
         <button
           type="submit"
           disabled={isGenerating || input.trim() === ''}
-          className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 disabled:opacity-40"
+          className="shrink-0 rounded-full bg-accent-500 px-5 py-2.5 text-sm font-semibold text-ink-950 transition-transform duration-150 active:scale-95 disabled:opacity-40"
         >
           发送
         </button>
       </form>
     </>
+  )
+}
+
+interface HeaderButtonProps {
+  onClick: () => void
+  children: string
+}
+
+/** 头部次级动作：默认安静，悬停时才让主色进来。 */
+function HeaderButton({ onClick, children }: HeaderButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-full px-3 py-1.5 text-sm text-ink-400 transition-colors hover:bg-ink-850 hover:text-accent-200"
+    >
+      {children}
+    </button>
+  )
+}
+
+interface ChipProps {
+  tone?: 'plain' | 'accent'
+  children: ReactNode
+}
+
+/** 关系状态用的紧凑标签；主色只留给「阶段」这一个最有信息量的位置。 */
+function Chip({ tone = 'plain', children }: ChipProps) {
+  const skin =
+    tone === 'accent'
+      ? 'border-accent-900 bg-accent-950 text-accent-200'
+      : 'border-ink-800 bg-ink-900 text-ink-400'
+
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] leading-5 ${skin}`}>
+      {children}
+    </span>
   )
 }
 
@@ -136,11 +158,13 @@ function Bubble({ role, content, pending = false, testId }: BubbleProps) {
     <div className={isUser ? 'flex justify-end' : 'flex justify-start'} data-testid={testId}>
       <div
         className={[
-          'max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed',
-          isUser ? 'bg-neutral-100 text-neutral-900' : 'bg-neutral-800 text-neutral-100',
+          'bubble rise-in max-w-[80%] whitespace-pre-wrap px-3.5 py-2.5 text-sm leading-relaxed',
+          isUser
+            ? 'bubble-from-you bg-accent-900 text-accent-200'
+            : 'bubble-from-her bg-ink-850 text-ink-100 ring-1 ring-inset ring-ink-800',
         ].join(' ')}
       >
-        {content === '' && pending ? <span className="text-neutral-500">…</span> : content}
+        {content === '' && pending ? <span className="text-ink-500">…</span> : content}
       </div>
     </div>
   )

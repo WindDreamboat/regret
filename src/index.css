@@ -1,1 +1,82 @@
 @import "tailwindcss";
+
+/*
+  「暖夜玫瑰」视觉令牌。
+
+  两处刻意的选择：
+  1. 中性色不是纯灰——每一档都带一丝玫瑰色相（chroma ≈ 0.010-0.016），让整屏与主色同温，
+     暗色下不至于发死。
+  2. 暗色层次靠表面明度而非阴影：Android WebView 上更稳，也符合暗色主题的观感。
+*/
+@theme {
+  --color-ink-950: oklch(16% 0.01 20);
+  --color-ink-900: oklch(20% 0.012 20);
+  --color-ink-850: oklch(23% 0.013 20);
+  --color-ink-800: oklch(27% 0.014 20);
+  --color-ink-700: oklch(36% 0.016 20);
+  --color-ink-600: oklch(50% 0.016 20);
+  --color-ink-500: oklch(62% 0.014 20);
+  --color-ink-400: oklch(72% 0.012 20);
+  --color-ink-300: oklch(82% 0.01 20);
+  --color-ink-200: oklch(89% 0.008 20);
+  --color-ink-100: oklch(96% 0.006 20);
+
+  --color-accent-200: oklch(90% 0.05 15);
+  --color-accent-300: oklch(82% 0.09 15);
+  --color-accent-400: oklch(74% 0.14 15);
+  --color-accent-500: oklch(68% 0.17 15);
+  --color-accent-600: oklch(60% 0.19 15);
+  --color-accent-700: oklch(50% 0.18 15);
+  --color-accent-900: oklch(30% 0.09 15);
+  --color-accent-950: oklch(22% 0.05 15);
+}
+
+/* 应用底：暖玫瑰光晕自顶部泻下，落入深底。纯色渐变，不含透明度，WebView 渲染稳。 */
+.app-canvas {
+  background-color: var(--color-ink-950);
+  background-image: radial-gradient(
+    130% 92% at 50% -18%,
+    var(--color-accent-950),
+    var(--color-ink-950) 64%
+  );
+}
+
+/*
+  气泡形态：说话的一侧收一个角。
+  用长写属性单独覆盖，避免与 Tailwind 圆角简写的层序不确定。
+*/
+.bubble {
+  border-radius: 1.35rem;
+}
+.bubble-from-her {
+  border-bottom-left-radius: 0.4rem;
+}
+.bubble-from-you {
+  border-bottom-right-radius: 0.4rem;
+}
+
+/* 安全区：打包成 App 后避开状态栏与手势条；桌面浏览器下 env() 为 0，退化为普通内边距。 */
+.safe-top {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+.safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* 消息入场：只动位移与不透明度，绝不碰颜色——e2e 会读气泡的 computed 颜色。 */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise-in {
+    animation: rise-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
