@@ -33,14 +33,24 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 仓库已提供脚本：`npm run cap:add`、`npm run cap:sync`、`npm run cap:open`（打开 Android Studio）。
 
-## 二·补、原生插件 `plugins/stream-http`
+## 二·补、两个原生插件
 
-仓库里现在有**一个原生插件**（首次引入原生代码），它只做一件事：**由原生层发请求并逐行回调**，用于厂商不支持跨源时的直连。
+仓库里有**两个原生插件**（原生代码是被这两件事逼出来的），各只做一件事。
+
+### `plugins/stream-http`：由原生层发请求并逐行回调
 
 - 为什么要它：浏览器侧跨源失败后，原本靠 Capacitor 自带的 `CapacitorHttp` 兜底，而它是**整包返回**。实测上游网关首字 18.8 s、之后连续吐约 52 s——整包返回意味着这七十秒界面上只有光标在闪、最后整段出现。插件把那段时间变成逐字。
 - 怎么接进来的：`package.json` 里 `"@regret/stream-http": "file:./plugins/stream-http"`；`npx cap sync android` 会在生成的 `android/capacitor.settings.gradle` 里加上 `include ':regret-stream-http'`（指向 `plugins/stream-http/android`）。`android/` 仍不入库，插件源随仓库走。
 - 回退链：`createNativeStreamFetch() ?? createNativeFetch()`——插件不可用或读流失败时退回整包路径，不会比之前更差。
 - 不想要它：删掉 `plugins/stream-http/`、`package.json` 里的那条依赖、`src/adapters/llm/nativeStreamFetch.ts`，并把 `composition/root.ts` 的回退链第一段去掉，再 `cap sync` 一次即可。
+
+### `plugins/file-save`：把文本交给系统「另存为」
+
+- 为什么要它：**WebView 自己不处理下载**。`<a download href="blob:…">` 在打包版里是一次静默空点击（实测点完 `/sdcard/Download` 无新文件、logcat 无任何下载活动），Capacitor 自带的 60 个 Java 文件里也没有任何 `DownloadListener`；`navigator.share` 同样不可用（Chrome 114 WebView 实测 `typeof navigator.share === 'undefined'`）。所以「导出记忆备份」只能由原生层弹系统对话框。
+- 怎么实现的：走 SAF 的 `ACTION_CREATE_DOCUMENT`——**不需要任何权限**，位置由用户自己选（也能存到 SD 卡或网盘）。没走「往公共下载目录写」的路子：那要为 API 29 以下再备一条需要存储权限的老路，而本机只有 API 29 能验证，等于留一条没验证过的分支。
+- 怎么接进来的：与上一条同构，`"@regret/file-save": "file:./plugins/file-save"`，`include ':regret-file-save'`。
+- 取消与失败是两回事：用户在对话框里放弃时以 `code: 'CANCELLED'` 拒绝，界面提示「已取消导出」；真失败才报红，且**不会偷偷改成浏览器下载**——否则用户会以为已保存。
+- 不想要它：删掉 `plugins/file-save/`、依赖与 `src/adapters/files/fileSave.ts`，把 `features/settings/dataManagement.ts` 的导出卖改回 Blob 下载，再 `cap sync` 一次。
 
 > 本机实测踩过的两个坑：
 > 1. **PATH 里的 `adb` 是老版本**（`C:\Windows\adb.exe` 为 1.0.31），一执行就会「adb server is out of date」并杀掉正在服务的 adb server，连带丢掉 `adb reverse` 映射与 `cap run` 会话。请显式使用 `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`。
