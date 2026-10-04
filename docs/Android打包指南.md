@@ -132,4 +132,5 @@ Capacitor 运行时，距 30 MB 上限很远（真机实测 APK 4.17 MB）。实
 8. **真机排查手段**：`capacitor.config.json` 里打开 `android.webContentsDebuggingEnabled` 后，可用 `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>` + CDP 直接读 WebView 的控制台与网络事件，`Network.loadingFailed` 会给出 `blockedReason`/`errorText`。这条路径比在客户端猜「为什么 `Failed to fetch`」快得多（本次就是靠它定位到 `ERR_CLEARTEXT_NOT_PERMITTED`）。
 9. **演示模式会污染真实模型的对话**：切到真实模型时，历史里若全是 Mock 的回声（`我听到你说：…`），模型会**照着模仿这个格式**。本机实测出现过「真实模型回复成了回声体」的现象——排查时不要据此断定走的是 Mock，应先看代理日志里有没有请求。要干净体验请先「清除对话与记忆」。
 10. **直连不支持跨域的厂商时没有逐字流**：浏览器 fetch 被跨域拦下后由系统网络请求兜底，而原生 HTTP 是**整包返回**，回复会一次性出现（实测该网关整包往返 4.9 s / 6.8 s）。厂商允许跨域时照旧走浏览器、保留逐字流。
-11. V1 不做 iOS。
+11. **状态栏不跟随 App 内的主题**（EMUI + 老 WebView 实测）：主题切换只作用于 WebView 里的内容。真机（GLK-AL00，WebView 114）实测，即便用 `@capacitor/status-bar` 把状态栏底色设成主题画布色——`dumpsys` 确认 `statusBarColor=#ff110a0a` 已写入窗口参数——屏幕上状态栏区域**仍是窗口底色 `#fafafa`**（对截图逐像素取样确认）：EMUI 把窗口底色画进了状态栏区域，盖过 App 的设置。曾按主题改写底色与图标色，结果深色主题下"白底白图标"完全不可见，**比不改更糟**，已回退该插件。现状：状态栏跟随系统主题、图标始终可读；在 WebView ≥ 140 / Android 15+ 的边到边设备上，状态栏区域透出的就是 App 自己的画布，会自然跟随主题。
+12. V1 不做 iOS。
