@@ -12,6 +12,27 @@
 
 ### 新增
 
+- **原生流式传输**：直连模式下，上游逐字吐出的内容现在实时显示（此前要等整包读完才出现）。
+  - 背景（实测）：厂商**其实是流式生成的**——首字 18.8 s，之后以每 ~134 ms 一块连续吐约 52 s；而 Capacitor 自带的 `CapacitorHttp` 是**整包返回**（读完整段 body 才 resolve），于是这七十秒界面上只有一个光标，最后整段"啪"地出现。客户端补节奏救不了七十秒的空白。
+  - 新增本地原生插件 `plugins/stream-http/`（包名 `@regret/stream-http`，在 `package.json` 里以 `file:` 依赖引入）：原生层用 `HttpURLConnection` 发请求，`readLine()` 逐行回调 `streamStart / streamLine / streamEnd / streamError`，事件带**客户端生成的请求 id**，因此支持并发与中断。**刻意不用 OkHttp**：Capacitor 的 android 模块并未把 OkHttp 暴露出来，自引一份等于多一个依赖，而 `HttpURLConnection` 的 `readLine()` 本来就是流式的。
+  - `src/adapters/llm/nativeStreamFetch.ts`：把插件事件包成标准 `ReadableStream` 并返回 `Response`，因此**适配器零改动**——SSE 解析、逐字节奏、光标、跟随滚动全部照旧生效。事件可能早于建流到达（原生层拿到响应头就开始吐），因此先入队、建流时冲刷。
+  - `composition/root.ts`：`createNativeStreamFetch() ?? createNativeFetch()`——优先流式，插件不可用或读流失败时退回整包路径，**不会比原来更差**。
+  - **明确的代价**：仓库**首次出现原生代码**（约 150 行 Java + 一个 gradle 模块）。`android/` 仍不入库，但插件源随仓库走，`npx cap sync` 会把它接进生成工程（`capacitor.settings.gradle` 出现 `:regret-stream-http`）。
+  - 测试：单测 213 → 221（包装层 7 例：平台/插件判定、事件还原成流、请求参数透传、未 start 即失败、读到一半断流、取消时中断原生请求、非 2xx 照传状态码）。
+  - **真机验证**（用设备上那份原样配置）：两百字请求的观测序列 `t=6s 51 字 → t=8s 75 → t=12s 151 → t=14s 220（完成）`，即文字是长出来的；修复前同一请求是"空格子 → 整段出现"。
+  - **回滚条件**：删掉 `plugins/stream-http/`、移除 `package.json` 里的 `file:` 依赖、删 `nativeStreamFetch.ts` 并去掉 `root.ts` 回退链的第一段（`cap sync` 会自动摘掉原生模块）。回滚后直连退回整包返回——功能不变，只是没有逐字。
+
+- 界面改版：**设置分类化 + 人设并入设置 + 双主题 + 打字体验重做**。
+  - **信息架构**：设置按「要改的是什么」分成四类——人设 / 说话方式 / 连接 / 数据，一次只呈现一类（`role="tablist"` + `role="tabpanel"`，指示条从左展开）；**人设不再是独立一页**，删除 `features/persona/PersonaPage.tsx`，表单搬到设置里的 `PersonaPanel`，并改为**改动即时生效**（去掉「保存」按钮，与旋钮、连接配置一致）。对话页头部随之只留一个「设置」入口（原来有「人设」「设置」两个按钮）。
+  - **交互与画面**：对话页头部不再 sticky（名字与关系随对话滚走，屏幕留给内容）；关系状态由三枚胶囊标签改为一行安静的文字（阶段用主色，其余为次要色）；气泡改为「同色字、不同底色」，靠对齐与底色区分，并按说话方分组调整疏密（同方连续消息更紧）；输入区改为胶囊输入框 + 圆形发送键（`aria-label="发送"`，保持可访问名不变）；危险操作由居中胶囊改为带细线分隔的列表行。
+  - **打字体验**（此前"像抽搐"）：新增 `features/chat/pacing.ts`（纯函数 `nextRevealCount`，基础 20ms/字、积压分档加速）+ `usePacedReveal`——**上游整包返回时把节奏补回来**（原生回退路径尤其明显），逐字流时只是跟着走；生成中显示闪烁光标（`.caret` 用空元素实现，不污染气泡文本）；新增 `useStickToBottom`，内容增长时跟随到底部，**但用户主动上翻时不抢滚动**。
+  - **双主题**：`index.css` 重写为语义令牌（canvas / surface / line / text / muted / accent / danger…），暗色与浅色各一套值、经 `prefers-color-scheme` 切换；浅色不是反相而是「白天同一盏灯」——暖纸底 + 发丝线托起气泡，且光晕刻意收得很小（整屏泛粉会变成糖纸）。`index.html` 补两段 `theme-color`。旧的中性灰 `neutral-*` 与 `ink-*`/`accent-*` 色阶全部退役。
+  - 新增 `.impeccable.md`：落盘设计上下文（使用者情境、品牌性格、美学方向、明确的反例、五条设计原则、以及"离线中文场景不打包字体"的约束），后续界面工作以它为准。
+  - 字体：中文场景 + 离线 App 无法打包 CJK 字体，改用系统字栈（PingFang SC / HarmonyOS Sans / Noto Sans / 微软雅黑），特色靠字号阶梯、clamp 与 tabular-nums，而非异体字。
+  - 测试：单测 194 → 201（新增 `pacing.test.ts` 7 例：结束时立即补齐、时间不足不跳字、20ms/字、积压加速、不超总量、单调递增）；e2e 42 → 44（新增「新消息自动跟随到底部」，并因信息架构变化更新了全部涉及设置与人设的用例；气泡配色断言由"字色不同"改为"底色不同、字色相同"）。
+  - **真机验证**：暗色与（CDP 模拟）浅色两套均截图确认；状态栏在浅色系统下由原生 `DayNight` 主题跟随，无需额外处理。
+  - **回滚条件**：`git revert` 该提交。回滚后设置回到一长条（人设需另开一页）、对话页头部恢复两个按钮、打字恢复成"整段一次性出现"（原生回退路径下尤其明显）、浅色系统下将回落到暗色界面（旧 CSS 只有一套暗色值）；对话、记忆与配置数据不受影响。
+
 - **跨域不再是必须部署代理的理由**：厂商接口不回 CORS 头时，App 改由**系统（原生）网络栈**发请求，直连模式对任意网关都成立。
   - 背景（实测）：打包版 WebView 来源是 `https://localhost`，对 `https://gateway.example.com/api/v1/chat/completions` 的预检返回 `405`、响应里没有任何 `Access-Control-Allow-*`，浏览器 fetch 必然失败——此前这类网关只能自建代理。
   - 新增 `src/adapters/llm/nativeFetch.ts`：`createNativeFetch()` 用 `@capacitor/core` 自带的 `CapacitorHttp` 把整包响应还原成 `Response`，因此适配器的 SSE 解析逻辑完全复用。**刻意不开启 `plugins.CapacitorHttp.enabled`**——那会把全局 fetch 换成原生实现，连能流式的厂商也一起牺牲；这里只在需要时显式调用插件。Web 上返回 `undefined`。
@@ -174,6 +195,20 @@
 
 ### 修复
 
+- **长对话下底部输入栏被顶出屏幕**（浏览器实测量化）：外壳用的是 `min-h-dvh`——它只给高度**下限**，内容一长就把整页撑高，于是中间的滚动容器不再内部滚动：实测输入栏底边落在 **926px**、视口只有 **844px**，输入栏有 82px 在屏幕外，用户必须整页滚动才能打字。
+  - `App.tsx`：外壳改 `h-dvh overflow-hidden`；`ChatPage` / `SettingsPage` 的滚动容器补 `min-h-0`（flex 子项默认 `min-height: auto`，不写它即使有 `overflow` 也不会收缩）；输入栏补一条发丝分隔线，消息列表底部留白 8px → 16px。
+  - 验证：同一场景 `inputBottom 926 → 832`、`inputVisible false → true`、整页不再滚动（`documentScrollable false`）、中段自己滚（`mainScrollable true`）。
+  - **回滚条件**：`git revert` 该提交；回滚后长对话下输入栏重新会被顶出屏幕。
+
+- **直连模式填「网关地址」时只回一句「接口返回 307」**（真机实测，`core/llm/config.ts` + `adapters/llm/nativeFetch.ts`）：
+  - 根因：设置里的「接口地址」被填成了网关地址（`https://gateway.example.com/api/v1`），厂商对该路径回 `307`、`location: http://…/v1/`；而**原生请求（OkHttp）不会自动跟随重定向**（浏览器会），于是 307 被原样当成错误抛出，界面上只剩一句状态码，用户无从改起。
+  - `core/llm/config.ts` 新增 `resolveDirectEndpoint`：直连时按**与代理侧完全相同的规则**补成完整接口地址（已是 `chat/completions` 原样使用；以 `/v1` 结尾补 `/chat/completions`；其余补 `/v1/chat/completions`）。`DeepSeekAdapter` 仅在直连模式使用它，**代理模式的端点不做任何改动**。
+  - `nativeFetch.ts` 自己跟随重定向：同域最多 3 跳（保住"厂商把 http 跳成 https"这类正常情况）；**跨域重定向不跟随**，改为抛出「接口被重定向到 X：请把接口地址直接填成这个地址」——既不把 API Key 送去另一个域，又给出可执行的下一步。
+  - `DeepSeekAdapter` 的 3xx 文案带上 `Location`；设置页在补过路径时显示「实际请求：<完整地址>」。
+  - 测试：单测 201 → 213（`resolveDirectEndpoint` 5 例；适配器"补路径"与"代理模式不补"各 1 例；原生重定向跟随 / 相对 Location / 跨域拒绝 / 跳数上限 4 例；3xx 文案 1 例）；e2e 44 → 46（新增「直连只填到网关时，提示实际请求地址」）。
+  - **真机复验**：用设备上那份原样的配置（只填到 `/v1`）发消息，请求打到 `/v1/chat/completions` 并返回 200 与真实回复，307 消失。
+  - **回滚条件**：`git revert` 该提交。回滚后直连必须手填完整接口地址，填网关地址会重新得到「接口返回 307」（原生路径不跟随重定向），跨域重定向也会退回成一句状态码。
+
 - **设置页的连接字段逐字输入时会被吞掉前缀**（真机实测暴露，`features/settings/SettingsPage.tsx`）：受控输入框直接把 `normalizeChatConfig` 的结果回填，而地址字段只接受 `http(s)://` 或 `/` 开头，于是手敲 `https://api.deepseek.com/v1/chat/completions` 时，前半截还不合法的前缀被当场抹掉——真机表现为输入框里只剩 `//api.deepseek.com/v1/chat/completions`，即**手输 URL 根本输不进去**（e2e 用 `fill()` 一次性赋值，所以此前没暴露）。
   - 现改为：输入框显示本地草稿，规范化后的值照旧入库；草稿没被采纳时（如 `ftp://…`）在该字段下方直接说明原因，不再让用户对着「填了却没生效」的哑谜。
   - 测试：e2e 新增「地址字段填了非法值时给出提示」，并把「切到直连」用例的接口地址改为 `pressSequentially` **逐字输入**（用 `fill()` 的话这个 bug 会溜过去）；e2e 40 → 42。
@@ -189,6 +224,12 @@
 - `features/chat/ChatPage.tsx` 的 `submit`：生成中按回车会先清空输入框、再被 `send` 丢弃，等于用户白打字；现改为生成中直接返回，保留已输入内容。**回滚条件**：`git revert` 该提交；回滚后输入内容会在生成中被无谓清空。
 
 ### 变更
+
+- 等待第一个字时改用**呼吸点**而不是单个光标（`index.css` 的 `.typing-dots` + `ChatPage`）：实测该网关**首字要 18.8 s**（之后以每 ~134 ms 一块连续吐 50 s），而原生回退路径是整包返回、这段时间没有任何字可显示——单个光标闪 70 秒看着像卡死。三个错开呼吸的点，是不用文字就能读懂的"她在打字"；有字之后交回光标；`prefers-reduced-motion` 下退化成亮度递减的静态三点。用空元素实现，气泡 `textContent` 仍是空串，不影响 e2e 对"逐字中间态"的判定。
+  - **回滚条件**：`git revert` 该提交；回滚后等待期回到单个闪烁光标。
+
+- 文档同步本批改动：`docs/Android打包指南.md` 新增「二·补、原生插件 `plugins/stream-http`」小节（为什么需要它、`cap sync` 如何接线、整包回退链、以及"不想要它时怎么删"），直连用法那行补「只填到网关也可以，缺的路径会自动补上，设置页会显示实际请求」；`docs/虚拟伴侣应用_需求简报与开发里程碑.md` 补「首次允许仓库包含原生代码」的决策变更（背景、范围控制、回退路径）。
+  - **回滚条件**：`git checkout HEAD~1 -- docs/Android打包指南.md "docs/虚拟伴侣应用_需求简报与开发里程碑.md"`，纯文档，不影响代码与运行。
 
 - `docs/Android打包指南.md` 同步真机实测结论：第三节改写为「直连厂商 / 走自建代理」两种用法的对照与各自前提（含两组厂商 CORS 实测：`api.deepseek.com` 放行、`gateway.example.com` 返回 405 且无 `Access-Control-Allow-*`）；第二节补两条本机已踩过的命令坑（PATH 里的老 `adb` 会杀掉 adb server、编辑器注入的 `NODE_OPTIONS` 删除垫片会让 `cap sync` 失败）；第四节的产物体积与第五节的验收清单更新为实测值（APK 4.17 MB、冷启动数据保留、键盘不遮挡、深色状态栏可读均已验证）。
   - **第五节「与代理连通」已补齐验证**：把同一份 `server/handler.ts` 起成裸 http server（等价于线上 serverless，而不是 Vite 插件——后者的 CORS 中间件会抢答 `OPTIONS`，开发环境永远测不到线上预检路径）＋ `adb reverse`，打包版实测 `OPTIONS 204`（`Allow-Origin` 与 `Allow-Methods: POST, OPTIONS` 来自我们的 handler）后 `POST 200` 两次（主对话 1478ms + 记忆抽取 2036ms）。为跑通该链路改了**生成工程**（不入库）：清单加 `android:usesCleartextTraffic="true"`、`assets/capacitor.config.json` 加 `cleartext/allowMixedContent/webContentsDebuggingEnabled`——实测仅靠 `server.cleartext` 无效，WebView 直接报 `net::ERR_CLEARTEXT_NOT_PERMITTED`。**仍未验证**：真正公网 https 代理（TLS 与跨网时延）。
