@@ -90,3 +90,16 @@ export function createDefaultRelation(sessionId: string, now: number): Relation 
     updatedAt: now,
   }
 }
+
+/**
+ * 一轮对话（用户说、她答完）的保底亲密度成长：由「关系推进」旋钮（0-1）映射到每轮 1-3。
+ *
+ * 之所以要客户端兜底：亲密度若只依赖模型状态块里的 `affection_delta`，实测模型经常
+ * 不给这个字段（只回 mood/energy），解析按 0 处理，亲密度就永远停在 0——
+ * 「关系在前进」是产品承诺，不能押在模型的字段完整性上。模型给的增量在此基础上
+ * 累加（暖心的回合加速、闹别扭的回合倒退），最终夹在 0-100。
+ */
+export function intimacyGainPerRound(pace: number): number {
+  const clamped = Math.min(1, Math.max(0, pace))
+  return 1 + Math.round(clamped * 2)
+}

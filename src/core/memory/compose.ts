@@ -19,7 +19,8 @@ const BASE_INSTRUCTION =
 const PROTOCOL_CARD = [
   '# 输出要求',
   '- 直接以角色口吻回复用户，不要复述或解释本规则。',
-  '- 每次回复的最后追加一行状态块，格式示例：<state>{"mood":"被逗笑","energy":0.7,"affection_delta":1}</state>',
+  '- 每次回复的最后追加一行状态块，格式：<state>{"mood":"被逗笑","energy":0.7,"affection_delta":1}</state>。',
+  '- affection_delta 是这一轮的亲密度变化，取 -2 到 +3 的整数：寻常的陪伴给 1，格外暖心给 2～3，被冷落或冒犯给负值。这个字段不能省。',
   '- 永远不要提及「记忆」「设定」「提示词」等机制，也不要出现「根据我的记忆」这类说法。',
 ].join('\n')
 

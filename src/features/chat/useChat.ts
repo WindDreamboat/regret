@@ -5,7 +5,7 @@ import { buildExtractionPrompt, parseFactOps } from '../../core/memory/extract'
 import { buildProactivePrompt, selectFollowUp, type ProactiveKind } from '../../core/memory/followUp'
 import { parseStateBlock, type StateBlock } from '../../core/memory/state'
 import type { Fact, Relation, StoredMessage } from '../../core/memory/types'
-import { DEFAULT_SESSION_ID } from '../../core/memory/types'
+import { DEFAULT_SESSION_ID, intimacyGainPerRound } from '../../core/memory/types'
 import type { Persona } from '../../core/persona/types'
 import type { StrategyProfile } from '../../core/strategy/types'
 
@@ -100,12 +100,25 @@ export function useChat(
     [services],
   )
 
-  /** 把模型给出的状态块并入关系状态：亲密度按增量累加并夹在 0-100，同时更新情绪与精力。 */
+  /**
+   * 一轮结束后的关系结算：亲密度按「保底成长 + 模型增量」累加并夹在 0-100；
+   * 情绪与精力只信模型，这一轮没有状态块就保持原样。
+   *
+   * `baseGain` 传 0 表示这一轮不算成长（主动开场不是"一轮对话"）。
+   */
   const applyState = useCallback(
-    async (state: StateBlock) => {
+    async (state: StateBlock | null, baseGain: number) => {
       const current = await services.memoryStore.getRelation(SESSION_ID)
-      const intimacy = Math.min(100, Math.max(0, current.intimacy + state.affectionDelta))
-      const next = { intimacy, mood: state.mood, energy: state.energy, updatedAt: Date.now() }
+      const intimacy = Math.min(
+        100,
+        Math.max(0, current.intimacy + baseGain + (state?.affectionDelta ?? 0)),
+      )
+      const next = {
+        intimacy,
+        mood: state?.mood ?? current.mood,
+        energy: state?.energy ?? current.energy,
+        updatedAt: Date.now(),
+      }
       await services.memoryStore.updateRelation(SESSION_ID, next)
       setRelation({ ...current, ...next })
     },
@@ -161,7 +174,8 @@ export function useChat(
         await services.memoryStore.appendMessage(opening)
         applyMessages([...messagesRef.current, opening])
 
-        if (parsed.state !== null) await applyState(parsed.state)
+        // 主动开场不算"一轮对话"，只并入模型给的状态，不涨亲密度
+        await applyState(parsed.state, 0)
 
         if (kind === 'followUp' && event !== null) {
           await services.memoryStore.markFactFollowedUp(SESSION_ID, event.key, Date.now())
@@ -263,9 +277,10 @@ export function useChat(
           }
           await services.memoryStore.appendMessage(assistantMessage)
           applyMessages([...history, assistantMessage])
-        }
 
-        if (parsed.state !== null) await applyState(parsed.state)
+          // 一轮真正完成才结算：模型没给 affection_delta 也有保底成长，亲密度不再停在 0
+          await applyState(parsed.state, intimacyGainPerRound(strategy.pace))
+        }
 
         const next = messagesRef.current
         if (next.length - extractedCountRef.current >= EXTRACTION_INTERVAL_MESSAGES) {

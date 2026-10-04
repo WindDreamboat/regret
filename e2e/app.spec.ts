@@ -200,7 +200,8 @@ test('关系状态条展示阶段、亲密度与情绪，并随回复更新', as
 
   await sendMessage(page, '你好')
 
-  await expect(bar).toContainText('亲密度 1')
+  // 一轮 = 客户端保底成长（「关系推进」默认档 2 点）+ 模型的 affection_delta（mock 给 1）
+  await expect(bar).toContainText('亲密度 3')
   await expect(bar).toContainText('温和')
 })
 
@@ -400,7 +401,8 @@ test('清除对话与记忆后回到开场，人设与说话方式保留', async
   await page.getByRole('slider', { name: '幽默感' }).fill('0.8')
   await backToChat(page)
   await sendRaw(page, '你好')
-  await expect(page.getByTestId('relation-bar')).toContainText('亲密度 1')
+  // 一轮 = 保底成长 2（「关系推进」默认档）+ 模型给的 1
+  await expect(page.getByTestId('relation-bar')).toContainText('亲密度 3')
 
   await openSettings(page, '数据')
   await page.getByRole('button', { name: '清除对话与记忆' }).click()
@@ -643,4 +645,48 @@ test('主题可切换：立即生效、刷新后保留、还能交回系统', as
   await page.getByRole('radio', { name: '跟随系统' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f4eae9')
+})
+
+test('翻着历史发消息，也会回到最新一句', async ({ page }) => {
+  await gotoApp(page)
+
+  // 把列表撑出滚动区域
+  for (const text of ['一', '二', '三', '四', '五', '六']) {
+    await sendMessage(page, '这是一条比较长的消息，用来把对话撑出滚动区域。'.repeat(2))
+  }
+
+  const distance = () =>
+    page.evaluate(() => {
+      const main = document.querySelector('main')
+      if (main === null) return Number.POSITIVE_INFINITY
+      return Math.round(main.scrollHeight - main.scrollTop - main.clientHeight)
+    })
+
+  // 主动翻回顶部读历史：她那边再来内容也不该把人拽走
+  await page.locator('main').evaluate((element) => {
+    element.scrollTop = 0
+  })
+  await expect.poll(distance).toBeGreaterThan(100)
+
+  // 但发消息是用户自己的动作：无论如何都要回到最新一句
+  await sendRaw(page, '还在吗')
+  await expect.poll(distance).toBe(0)
+})
+
+test('亲密度随对话增长，不再停在 0', async ({ page }) => {
+  await gotoApp(page)
+
+  const intimacyOf = async () => {
+    const text = await page.getByTestId('relation-bar').textContent()
+    return Number(text?.match(/亲密度 (\d+)/)?.[1] ?? -1)
+  }
+
+  // 主动开场不算"一轮对话"：欢迎语说完仍是 0
+  expect(await intimacyOf()).toBe(0)
+
+  await sendMessage(page, '你好')
+  await sendMessage(page, '在吗')
+
+  // 模型的 affection_delta 之外还有客户端保底成长，两轮之后必然大于 0
+  expect(await intimacyOf()).toBeGreaterThan(0)
 })
