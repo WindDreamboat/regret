@@ -29,13 +29,19 @@ export function ChatPage({ services, persona, strategy, onOpenSettings }: ChatPa
 
   // 上游整包返回时把节奏补回来；逐字流时只是跟着走
   const visibleDraft = usePacedReveal(draft, isGenerating)
-  useStickToBottom(scrollRef, `${messages.length}:${visibleDraft.length}:${error ?? ''}`)
+  const { stickToBottom } = useStickToBottom(
+    scrollRef,
+    `${messages.length}:${visibleDraft.length}:${error ?? ''}`,
+  )
 
   const submit = () => {
     // 正在生成时不要清空输入框：send 会直接返回，否则用户刚打的字会被无谓清掉
     if (isGenerating) return
     const text = input
     setInput('')
+    // 发消息是用户自己的动作：哪怕他正翻着历史，也必须回到最新一句——
+    // 「读历史时不抢滚动」只该约束她那边来的内容
+    stickToBottom()
     void send(text)
   }
 
