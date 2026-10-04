@@ -33,6 +33,15 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 仓库已提供脚本：`npm run cap:add`、`npm run cap:sync`、`npm run cap:open`（打开 Android Studio）。
 
+## 二·补、原生插件 `plugins/stream-http`
+
+仓库里现在有**一个原生插件**（首次引入原生代码），它只做一件事：**由原生层发请求并逐行回调**，用于厂商不支持跨源时的直连。
+
+- 为什么要它：浏览器侧跨源失败后，原本靠 Capacitor 自带的 `CapacitorHttp` 兜底，而它是**整包返回**。实测上游网关首字 18.8 s、之后连续吐约 52 s——整包返回意味着这七十秒界面上只有光标在闪、最后整段出现。插件把那段时间变成逐字。
+- 怎么接进来的：`package.json` 里 `"@regret/stream-http": "file:./plugins/stream-http"`；`npx cap sync android` 会在生成的 `android/capacitor.settings.gradle` 里加上 `include ':regret-stream-http'`（指向 `plugins/stream-http/android`）。`android/` 仍不入库，插件源随仓库走。
+- 回退链：`createNativeStreamFetch() ?? createNativeFetch()`——插件不可用或读流失败时退回整包路径，不会比之前更差。
+- 不想要它：删掉 `plugins/stream-http/`、`package.json` 里的那条依赖、`src/adapters/llm/nativeStreamFetch.ts`，并把 `composition/root.ts` 的回退链第一段去掉，再 `cap sync` 一次即可。
+
 > 本机实测踩过的两个坑：
 > 1. **PATH 里的 `adb` 是老版本**（`C:\Windows\adb.exe` 为 1.0.31），一执行就会「adb server is out of date」并杀掉正在服务的 adb server，连带丢掉 `adb reverse` 映射与 `cap run` 会话。请显式使用 `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`。
 > 2. **编辑器注入的 `NODE_OPTIONS` 删除垫片会让 `cap sync` / `cap copy` 失败**（重建 `assets/` 时报 `[safe-delete] ... trash operation ... aborted`）。跑 Capacitor CLI 前先 `set NODE_OPTIONS=`。
@@ -45,7 +54,7 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 | 用法 | 设置项 | 前提 |
 |----|----|----|
-| **直连厂商**（`direct`） | 接口地址填厂商的**完整接口地址**（如 `https://api.deepseek.com/v1/chat/completions`），API Key 必填，模型名留空即用 `deepseek-chat` | 只要能访问到该接口；**不要求厂商支持跨源**（见下）；Key 存在设备上 |
+| **直连厂商**（`direct`） | 接口地址填厂商的**完整接口地址**（如 `https://api.deepseek.com/v1/chat/completions`）；**只填到网关也可以**（如 `https://api.deepseek.com` 或 `…/v1`），缺的路径会自动补上，设置页会显示「实际请求」；API Key 必填，模型名留空即用 `deepseek-chat` | 只要能访问到该接口；**不要求厂商支持跨源**（见下）；Key 存在设备上 |
 | **走自建代理**（`deepseek`） | 代理地址填你的代理 `/api/chat`；Key / 网关 / 模型可留空由代理侧兜底 | 需要自己部署一个转发用 serverless function；代理侧需设 `CHAT_ALLOWED_ORIGIN=https://localhost` |
 
 直连为什么连**不支持 CORS** 的厂商也能用（打包后 WebView 来源是 `https://localhost`，跨源请求会先发 `OPTIONS` 预检）：
