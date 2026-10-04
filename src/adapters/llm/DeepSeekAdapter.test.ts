@@ -185,6 +185,29 @@ describe('DeepSeekAdapter 直连模式', () => {
     })
   })
 
+  it('只填到网关时自动补全接口路径（真机上漏填过 /chat/completions）', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'https://gateway.example.com/api/v1',
+      fetchImpl,
+    })
+
+    await collect(adapter.stream(messages))
+
+    const [url] = fetchImpl.mock.calls[0] ?? []
+    expect(url).toBe('https://gateway.example.com/api/v1/chat/completions')
+  })
+
+  it('代理模式不做任何路径补全：端点就是端点', async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => sseResponse(['data: [DONE]\n\n']))
+    const adapter = new DeepSeekAdapter({ endpoint: '/api/chat', fetchImpl })
+
+    await collect(adapter.stream(messages))
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/chat')
+  })
+
   it('模型名留空时用直连默认值，且不发 X-Chat-* 头', async () => {
     const { init } = await directRequest({})
 
@@ -215,6 +238,31 @@ describe('DeepSeekAdapter 直连模式', () => {
     const events = await collect(adapter.stream(messages))
 
     expect(events).toEqual([{ type: 'error', message: '接口返回 401' }])
+  })
+
+  it('遇到 3xx 时把重定向目标带进文案，用户才知道该改成什么地址', async () => {
+    const fetchImpl = vi.fn<FetchLike>(
+      async () =>
+        new Response('', {
+          status: 307,
+          headers: { location: 'https://gateway.example.com/v1/chat/completions' },
+        }),
+    )
+    const adapter = new DeepSeekAdapter({
+      mode: 'direct',
+      endpoint: 'http://gateway.example.com/v1/chat/completions',
+      fetchImpl,
+    })
+
+    const events = await collect(adapter.stream(messages))
+
+    expect(events).toEqual([
+      {
+        type: 'error',
+        message:
+          '接口返回 307（重定向到 https://gateway.example.com/v1/chat/completions）',
+      },
+    ])
   })
 
   it('直连也解析 OpenAI 兼容的 SSE', async () => {

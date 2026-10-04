@@ -63,6 +63,25 @@ export const CHAT_CONFIG_HEADERS = {
 const MAX_FIELD_LENGTH = 2048
 
 /**
+ * 把直连模式填的地址补成**完整的对话接口地址**。
+ *
+ * 为什么需要：设置里那个框，用户很容易把"网关地址"当成"接口地址"填进来——真机实测有人填
+ * `https://gateway.example.com/api/v1`，厂商回 307 把它跳到 `/v1/`，原生请求不跟随
+ * 重定向，于是界面只报一句「接口返回 307」。
+ *
+ * 补路径的规则与代理侧完全一致（见 `server/handler.ts`）：已经是 `chat/completions` 就原样用，
+ * 以 `/v1` 结尾就补 `/chat/completions`，其余补 `/v1/chat/completions`。纯函数，不改入参。
+ */
+export function resolveDirectEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim().replace(/\/+$/, '')
+  if (trimmed === '') return ''
+
+  if (trimmed.endsWith('/chat/completions')) return trimmed
+  if (trimmed.endsWith('/v1')) return `${trimmed}/chat/completions`
+  return `${trimmed}/v1/chat/completions`
+}
+
+/**
  * 规范化连接配置。
  *
  * localStorage 属于不可信边界（规约第五节）：非对象整体退回默认；`provider` 非枚举值

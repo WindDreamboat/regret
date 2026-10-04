@@ -92,4 +92,86 @@ describe('createNativeFetch', () => {
       createNativeFetch()?.('https://gateway.example.com/v1/chat/completions', { method: 'POST' }),
     ).rejects.toThrow('Unable to resolve host')
   })
+
+  it('同域重定向自动跟随：最常见的是厂商把 http 跳成 https', async () => {
+    platform.native = true
+    request
+      .mockResolvedValueOnce({
+        data: '',
+        status: 307,
+        url: 'http://gateway.example.com/v1/chat/completions',
+        headers: { location: 'https://gateway.example.com/v1/chat/completions' },
+      })
+      .mockResolvedValueOnce(okResponse(SSE, { 'content-type': 'text/event-stream' }))
+
+    const response = await createNativeFetch()?.('http://gateway.example.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer sk-1' },
+      body: '{"model":"x"}',
+    })
+
+    expect(response?.status).toBe(200)
+    await expect(response?.text()).resolves.toBe(SSE)
+
+    // 第二跳打到新地址，方法、请求头与请求体原样保留（307 的语义）
+    expect(request).toHaveBeenCalledTimes(2)
+    const second = request.mock.calls[1]?.[0] as Record<string, unknown>
+    expect(second['url']).toBe('https://gateway.example.com/v1/chat/completions')
+    expect(second['method']).toBe('POST')
+    expect(second['data']).toBe('{"model":"x"}')
+    expect(second['headers']).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer sk-1',
+    })
+  })
+
+  it('相对地址的 Location 也能跟随', async () => {
+    platform.native = true
+    request
+      .mockResolvedValueOnce({
+        data: '',
+        status: 301,
+        url: 'https://gateway.example.com/v1/chat/completions',
+        headers: { location: '/chat/completions' },
+      })
+      .mockResolvedValueOnce(okResponse(SSE))
+
+    await createNativeFetch()?.('https://gateway.example.com/v1/chat/completions', { method: 'POST' })
+
+    expect(request.mock.calls[1]?.[0]).toMatchObject({
+      url: 'https://gateway.example.com/chat/completions',
+    })
+  })
+
+  it('跨域重定向不跟随：不把密钥送去另一个域，并告诉用户该填哪个地址', async () => {
+    platform.native = true
+    request.mockResolvedValue({
+      data: '',
+      status: 307,
+      url: 'https://gateway.example.com/v1/chat/completions',
+      headers: { location: 'https://evil.example.net/v1/chat/completions' },
+    })
+
+    await expect(
+      createNativeFetch()?.('https://gateway.example.com/v1/chat/completions', { method: 'POST' }),
+    ).rejects.toThrow('接口被重定向到 https://evil.example.net/v1/chat/completions')
+
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('重定向成环时在跳数上限处停下，而不是无限打请求', async () => {
+    platform.native = true
+    request.mockResolvedValue({
+      data: '',
+      status: 307,
+      url: 'https://gateway.example.com/v1/chat/completions',
+      headers: { location: 'https://gateway.example.com/v1/chat/completions?round=2' },
+    })
+
+    await expect(
+      createNativeFetch()?.('https://gateway.example.com/v1/chat/completions', { method: 'POST' }),
+    ).rejects.toThrow('重定向超过')
+
+    expect(request).toHaveBeenCalledTimes(4)
+  })
 })

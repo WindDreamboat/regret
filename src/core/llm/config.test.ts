@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { CHAT_CONFIG_HEADERS, DEFAULT_CHAT_CONFIG, normalizeChatConfig } from './config'
+import {
+  CHAT_CONFIG_HEADERS,
+  DEFAULT_CHAT_CONFIG,
+  normalizeChatConfig,
+  resolveDirectEndpoint,
+} from './config'
 
 describe('normalizeChatConfig', () => {
   it('非对象整体退回默认', () => {
@@ -84,5 +89,46 @@ describe('CHAT_CONFIG_HEADERS', () => {
       baseUrl: 'X-Chat-Base-Url',
       model: 'X-Chat-Model',
     })
+  })
+})
+
+describe('resolveDirectEndpoint', () => {
+  it('已经是完整接口地址就原样使用', () => {
+    expect(resolveDirectEndpoint('https://api.deepseek.com/v1/chat/completions')).toBe(
+      'https://api.deepseek.com/v1/chat/completions',
+    )
+    expect(resolveDirectEndpoint('https://gateway.example.com/chat/completions')).toBe(
+      'https://gateway.example.com/chat/completions',
+    )
+  })
+
+  it('补上遗漏的路径：与代理侧同一套规则', () => {
+    // 真机上出现过的填法：只填到 /v1，厂商把它 307 跳到别处，界面只报一句状态码
+    expect(resolveDirectEndpoint('https://gateway.example.com/api/v1')).toBe(
+      'https://gateway.example.com/api/v1/chat/completions',
+    )
+    expect(resolveDirectEndpoint('https://api.deepseek.com')).toBe(
+      'https://api.deepseek.com/v1/chat/completions',
+    )
+  })
+
+  it('容忍尾斜杠与首尾空白', () => {
+    expect(resolveDirectEndpoint('  https://api.deepseek.com/v1/  ')).toBe(
+      'https://api.deepseek.com/v1/chat/completions',
+    )
+    expect(resolveDirectEndpoint('https://api.deepseek.com/v1/chat/completions/')).toBe(
+      'https://api.deepseek.com/v1/chat/completions',
+    )
+  })
+
+  it('空串原样返回，由调用方给出「还没填」的提示', () => {
+    expect(resolveDirectEndpoint('')).toBe('')
+    expect(resolveDirectEndpoint('   ')).toBe('')
+  })
+
+  it('纯函数：不改入参', () => {
+    const input = 'https://api.deepseek.com/v1/'
+    resolveDirectEndpoint(input)
+    expect(input).toBe('https://api.deepseek.com/v1/')
   })
 })

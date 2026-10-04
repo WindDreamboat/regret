@@ -1,5 +1,9 @@
 import type { ChatProvider } from '../../core/llm/ChatProvider'
-import { CHAT_CONFIG_HEADERS, DEFAULT_DIRECT_MODEL } from '../../core/llm/config'
+import {
+  CHAT_CONFIG_HEADERS,
+  DEFAULT_DIRECT_MODEL,
+  resolveDirectEndpoint,
+} from '../../core/llm/config'
 import type { ChatMessage, StreamEvent } from '../../core/llm/protocol'
 
 /** 最小 fetch 依赖，便于测试注入 */
@@ -58,10 +62,11 @@ export class DeepSeekAdapter implements ChatProvider {
   constructor(options: DeepSeekAdapterOptions = {}) {
     this.mode = options.mode ?? 'proxy'
     this.nativeFetch = options.nativeFetch
+    // 直连时允许只填网关地址：按与代理同一套规则补成完整接口地址（见 resolveDirectEndpoint）
     // 相对路径的默认值只在代理模式成立：打包成 App 后 WebView 解析不了相对路径，
     // 直连模式留空即视为未配置，交给 stream() 给出可读的错误提示。
-    this.endpoint =
-      options.endpoint ?? (this.mode === 'direct' ? '' : DEFAULT_PROXY_ENDPOINT)
+    const endpoint = options.endpoint ?? (this.mode === 'direct' ? '' : DEFAULT_PROXY_ENDPOINT)
+    this.endpoint = this.mode === 'direct' ? resolveDirectEndpoint(endpoint) : endpoint
     this.apiKey = options.apiKey ?? ''
     this.baseUrl = options.baseUrl ?? ''
     this.model = options.model ?? ''
@@ -132,7 +137,7 @@ export class DeepSeekAdapter implements ChatProvider {
 
     if (!response.ok) {
       const source = this.mode === 'direct' ? '接口' : '代理'
-      yield { type: 'error', message: `${source}返回 ${response.status}` }
+      yield { type: 'error', message: `${source}返回 ${response.status}${redirectHint(response)}` }
       return
     }
     if (!response.body) {
@@ -169,6 +174,18 @@ export class DeepSeekAdapter implements ChatProvider {
       reader.releaseLock()
     }
   }
+}
+
+/**
+ * 3xx 时把目标地址带出来。
+ *
+ * 只报「接口返回 307」等于把排查甩给用户；把 `Location` 一并显示出来，他就能直接把设置里的
+ * 地址改成厂商标明的那个（最常见的是厂商把 http 跳成 https）。
+ */
+function redirectHint(response: Response): string {
+  if (response.status < 300 || response.status >= 400) return ''
+  const location = response.headers.get('location')
+  return location === null ? '（重定向，但未给出目标地址）' : `（重定向到 ${location}）`
 }
 
 /** 只有绝对地址才能直接交给原生层去发（相对地址得先有来源作为基准）。 */

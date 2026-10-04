@@ -5,6 +5,9 @@ import type { FetchLike } from './DeepSeekAdapter'
 const CONNECT_TIMEOUT_MS = 30_000
 const READ_TIMEOUT_MS = 180_000
 
+/** 最多跟随几次重定向，防止 A→B→A 这类循环把请求打成死循环 */
+const MAX_REDIRECTS = 3
+
 /**
  * 系统级（原生）HTTP 传输：请求由宿主 App 发出，因此**不受浏览器同源策略约束**。
  *
@@ -22,24 +25,66 @@ export function createNativeFetch(): FetchLike | undefined {
   if (!Capacitor.isNativePlatform()) return undefined
 
   return async (input, init) => {
-    const response = await CapacitorHttp.request({
-      url: input,
-      method: init.method ?? 'GET',
-      headers: readHeaders(init.headers),
-      connectTimeout: CONNECT_TIMEOUT_MS,
-      readTimeout: READ_TIMEOUT_MS,
-      ...(typeof init.body === 'string' ? { data: init.body } : {}),
-    })
+    let url = input
 
-    // 还原成 Response，让适配器继续用同一套 SSE 解析：整段文本里的 data: 行照样成立
-    const headers = new Headers()
-    for (const [name, value] of Object.entries(response.headers)) headers.set(name, value)
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      const response = await CapacitorHttp.request({
+        url,
+        method: init.method ?? 'GET',
+        headers: readHeaders(init.headers),
+        connectTimeout: CONNECT_TIMEOUT_MS,
+        readTimeout: READ_TIMEOUT_MS,
+        ...(typeof init.body === 'string' ? { data: init.body } : {}),
+      })
 
-    return new Response(typeof response.data === 'string' ? response.data : JSON.stringify(response.data), {
-      status: response.status,
-      headers,
-    })
+      const location = readLocationHeader(response.headers)
+
+      // 原生层不会自动跟随重定向（浏览器会），因此这里自己跟：最常见的是厂商把 http 跳成 https
+      if (!isRedirect(response.status) || location === null) return toResponse(response)
+
+      const next = resolveLocation(location, url)
+      if (new URL(next).host !== new URL(url).host) {
+        throw new Error(`接口被重定向到 ${next}：请把接口地址直接填成这个地址`)
+      }
+      url = next
+    }
+
+    throw new Error(`接口重定向超过 ${MAX_REDIRECTS} 次`)
   }
+}
+
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
+/** 相对地址的 Location 也要能解析；解析不出来就当没有重定向，原样交给调用方报错 */
+function resolveLocation(location: string, from: string): string {
+  try {
+    return new URL(location, from).toString()
+  } catch {
+    return from
+  }
+}
+
+function readLocationHeader(headers: Record<string, string>): string | null {
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === 'location' && value.trim() !== '') return value.trim()
+  }
+  return null
+}
+
+function toResponse(response: {
+  data: unknown
+  status: number
+  headers: Record<string, string>
+}): Response {
+  const headers = new Headers()
+  for (const [name, value] of Object.entries(response.headers)) headers.set(name, value)
+
+  return new Response(
+    typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
+    { status: response.status, headers },
+  )
 }
 
 /** 适配器只传普通对象形式的头；其余形态（Headers 实例、数组）在这里统一成对象。 */
