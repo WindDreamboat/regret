@@ -12,6 +12,17 @@
 
 ### 新增
 
+- 连接配置改为**页面可配置**（设置页新增「连接」区块）：对话服务（演示模式 / 真实模型）、代理地址、API Key、网关地址、模型名均可即时填写并保存在本机，**打包出 APK 后不必为改这些值重新构建**。
+  - `core/llm/config.ts`：新增 `ChatConfig` / `DEFAULT_CHAT_CONFIG` / `normalizeChatConfig`（localStorage 属不可信边界：非对象退默认、`provider` 非枚举退 `mock`、文本去空白并截断、地址只接受 `http(s)://` 或 `/` 开头）与 `CHAT_CONFIG_HEADERS`（前后端共用的头名常量，避免字面量漂移）。
+  - `features/settings/chatConfigStorage.ts`：localStorage key `regret.chatConfig`；**无本地记录时回退构建期 `.env`**，因此 Web 与开发环境行为不变。
+  - `adapters/llm/DeepSeekAdapter.ts`：连接配置随 `Authorization` / `X-Chat-Base-Url` / `X-Chat-Model` **条件透传**（为空不发送该头，未配置时请求与引入前逐字节一致）。
+  - `server/handler.ts`：连接配置优先级 **请求头 > 环境变量 > 内置默认**；空白头视同未提供（否则页面留空会覆盖代理 env）；预检 `Access-Control-Allow-Headers` 增补这三个头（`Authorization` 不在 CORS 安全名单内，不声明则跨源预检必失败）。
+  - `composition/root.ts`：`createServices(config)` 由配置派生；`App.tsx` 以 `useMemo` 随配置重建服务（设置页与对话页互斥，不会打断进行中的对话）。
+  - `SettingsPage.tsx` 新增「连接」区块，即时生效、无保存按钮；`dataManagement.ts` 的「恢复出厂设置」一并清除连接配置。**导出不含连接配置**——备份文件不该带明文 Key。
+  - 测试：单测 171（新增 config 8、DeepSeekAdapter 2、handler 6）；e2e 38（新增「连接配置刷新后保留」「恢复出厂清空连接配置」各 1，desktop / mobile 各半）。
+  - **安全取舍**：这与迭代 1「API Key 绝不进前端」的决策相反。Key 明文存于设备 localStorage，并会出现在代理访问日志的 `Authorization` 头里 → 代理侧需关闭或脱敏 header 日志；代理仍是**无鉴权中继**，页面留空时会消耗代理 env 里的 Key，**来源白名单与限流仍然必要**。
+  - **回滚条件**：`git revert` 该功能提交。回滚后页面不再有「连接」区块，`regret.chatConfig` 成为孤立 localStorage 键（用户手动删除即可）；代理头覆盖逻辑移除后请求退回只读 env，打包版将重新只能靠 `.env`（即回到「回声机」问题）。回滚不影响对话数据与既有配置键。
+
 - 迭代 4 批次 4：Capacitor Android 打包配置与打包指南。
   - 依赖：`@capacitor/core`、`@capacitor/cli`、`@capacitor/android`（同一主版本 8.5.2）。
   - 新增 `capacitor.config.ts`：`appId`、`appName`、`webDir: 'dist'`、**显式 `server.androidScheme: 'https'`**（若为 `http`，WebView 会变成不透明来源，IndexedDB 与 localStorage 将无法持久化）、`android.allowMixedContent: false`、`webContentsDebuggingEnabled: false`；不写 `server.url`（那是热更新调试用，写死会随包发布）。
