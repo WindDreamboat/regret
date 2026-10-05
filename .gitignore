@@ -42,4 +42,5 @@ plugins/*/android/build/
 *.jks
 local.properties
 .gradle/
-apk
+# 本地分发的安装包不入库
+*.apk
