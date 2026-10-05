@@ -124,7 +124,7 @@ Capacitor 运行时，距 30 MB 上限很远（真机实测 APK 4.17 MB）。实
 
 1. **返回键会直接退出应用**：应用没有路由，`canGoBack()` 恒为 false；在设置页按返回不会回到对话页（真机已复现）。后续可用 `history.pushState` + `popstate` 修复。
 2. **边到边安全区只在部分设备上生效**：`index.html` 有 `viewport-fit=cover`，页头与底部栏也加了 `env(safe-area-inset-*)` 内边距；但本机真机的 WebView 并非边到边绘制，`env()` 取值为 0，因此**未在真正边到边的设备上验证过**。
-3. **只有 debug 包可安装**：release 包未签名无法安装；若要发布，keystore 必须在本地生成并**绝不入库**（`.gitignore` 已排除 `*.keystore` / `*.jks`）。
+3. **release 包需要自己接签名**：生成工程默认不带签名配置，`assembleRelease` 只会产出**装不上的未签名包**。本机已在生成的 `app/build.gradle` 里加了签名配置：仓库根的 `keystore.properties`（storeFile / storePassword / keyAlias / keyPassword，**不入库**）存在时用它，否则退回本机调试密钥——当前即调试密钥签名，好处是与已安装的 debug 包**同签名、覆盖安装不丢本地数据**，也适合直接把 release 包发人试用（实测 3.1 MB）。分发产物（如 `虚拟伴侣-1.0.apk`）不入库（`.gitignore` 的 `apk`）。**正式对外发布前**应生成自己的发布密钥（`keytool -genkeypair`，密钥与密码绝不入库），并注意：换签名后所有已安装用户必须卸载重装，数据先用「导出记忆备份」带走。
 4. **走代理时，代理会成为公网入口**：代理本身不鉴权，CORS 只约束浏览器。页面留空时会消耗代理 env 里的 Key，请务必加来源校验与限流，否则任何人都能消耗你的 API Key。**直连模式没有这个入口**（请求直接发往厂商）。
 5. **API Key 会落在设备上**：设置页填的 Key 明文存于设备 localStorage。走代理时它随 `Authorization` 头发给代理、会出现在代理访问日志里（需关闭或脱敏 header 日志）；直连时它直接发给厂商，没有任何中间层可以代持或脱敏。
 6. **清除应用数据会删掉全部本地内容**：对话、记忆、人设与设置都存在设备本地（IndexedDB + localStorage），这是预期行为。
