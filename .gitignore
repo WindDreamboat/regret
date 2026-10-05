@@ -16,8 +16,9 @@ dist/
 .DS_Store
 Thumbs.db
 .env
-# Trae 编辑器工作目录（本地计划与临时文件，不入库）
+# Trae / CodeBuddy 编辑器工作目录（本地计划与临时文件，不入库）
 .trae/
+.codebuddy/
 
 # 日志
 *.log
@@ -41,3 +42,4 @@ plugins/*/android/build/
 *.jks
 local.properties
 .gradle/
+apk
